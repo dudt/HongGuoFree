@@ -173,18 +173,21 @@ final class AppStore: ObservableObject {
     }
 
     var favorites: [Drama] {
-        library.favorites.compactMap { drama(id: $0) }
+        library.favorites.compactMap { id in self.drama(id: id) }
     }
 
     var historyDramas: [Drama] {
-        library.history.compactMap { drama(id: $0) }
+        library.history.compactMap { id in self.drama(id: id) }
     }
 
     func continueWatching(limit: Int = 8) -> [ContinueItem] {
-        let items: [ContinueItem] = library.history.compactMap { id in
-            guard let drama = drama(id: id), let record = library.record(for: id) else { return nil }
-            return ContinueItem(drama: drama, record: record)
+        var items: [ContinueItem] = []
+        for id in library.history {
+            guard let item = drama(id: id),
+                  let record = library.record(for: id) else { continue }
+            items.append(ContinueItem(drama: item, record: record))
+            if items.count >= limit { break }
         }
-        return Array(items.prefix(limit))
+        return items
     }
 }
