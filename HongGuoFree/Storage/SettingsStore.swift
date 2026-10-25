@@ -7,7 +7,6 @@ import Combine
 
 final class SettingsStore: ObservableObject {
     private enum Key {
-        static let feedURL = "app.feedURL"
         static let autoplayNext = "app.autoplayNext"
         static let loopEpisode = "app.loopEpisode"
         static let rememberProgress = "app.rememberProgress"
@@ -20,7 +19,6 @@ final class SettingsStore: ObservableObject {
     private let defaults = UserDefaults.standard
     private var bag = Set<AnyCancellable>()
 
-    @Published var feedURLString: String
     @Published var autoplayNext: Bool
     @Published var loopEpisode: Bool
     @Published var rememberProgress: Bool
@@ -52,7 +50,6 @@ final class SettingsStore: ObservableObject {
         ])
 
         let storedRate = defaults.double(forKey: Key.playbackRate)
-        feedURLString = defaults.string(forKey: Key.feedURL) ?? ""
         autoplayNext = defaults.bool(forKey: Key.autoplayNext)
         loopEpisode = defaults.bool(forKey: Key.loopEpisode)
         rememberProgress = defaults.bool(forKey: Key.rememberProgress)
@@ -66,9 +63,6 @@ final class SettingsStore: ObservableObject {
 
     /// 任何设置变化都写回 UserDefaults（避免给 @Published 加 didSet）
     private func bindPersistence() {
-        $feedURLString
-            .sink { [weak self] in self?.defaults.set($0, forKey: Key.feedURL) }
-            .store(in: &bag)
         $autoplayNext
             .sink { [weak self] in self?.defaults.set($0, forKey: Key.autoplayNext) }
             .store(in: &bag)
@@ -90,31 +84,6 @@ final class SettingsStore: ObservableObject {
         $resolverToken
             .sink { [weak self] in self?.defaults.set($0, forKey: Key.resolverToken) }
             .store(in: &bag)
-    }
-
-    var customFeedURL: URL? {
-        let trimmed = feedURLString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let url = URL(string: trimmed),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https" else { return nil }
-        return url
-    }
-}
-
-// MARK: - 收藏 / 历史 / 进度
-
-final class LibraryStore: ObservableObject {
-    @Published private(set) var favorites: Set<String> = []
-    @Published private(set) var history: [String] = []
-    @Published private(set) var records: [String: PlaybackRecord] = [:]
-
-    private let fileURL: URL
-    private let queue = DispatchQueue(label: "com.hongguofree.library", qos: .utility)
-
-    private struct Snapshot: Codable {
-        var favorites: [String]
-        var history: [String]
-        var records: [String: PlaybackRecord]
     }
 
     init() {

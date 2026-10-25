@@ -1,364 +1,319 @@
-// 首页：竖向沉浸流
+// 首页：真实短剧流（数据来自自建解析服务 /api/discover）
 import SwiftUI
 
 struct FeedView: View {
-    @EnvironmentObject private var store: AppStore
-    @EnvironmentObject private var player: PlayerEngine
+    @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var feed: HGFeedStore
+    @EnvironmentObject private var library: HGLibraryStore
 
-    @State private var selectedCategory: String?
-    @State private var path: [Drama] = []
+    @State private var playerSeries: HGFeedItem?
 
-    private var filtered: [Drama] {
-        store.filtered(byCategory: selectedCategory)
-    }
+    // 服务端 tab 语义：201 推荐 / 202 追剧 / 203 榜单 / 204 新剧
+    private let tabs: [(id: Int, name: String)] = [
+        (201, "推荐"),
+        (202, "热播"),
+        (203, "榜单"),
+        (204, "新剧"),
+    ]
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack {
             ZStack {
                 Palette.background.ignoresSafeArea()
 
                 ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: 18) {
-                        heroHeader
+                    LazyVStack(spacing: 16) {
+                        header
+                        tabRow
 
-                        if let message = store.errorMessage {
-                            ErrorBanner(message: message) {
-                                Task { await store.reloadAll() }
-                            }
+                        if let msg = feed.errorText {
+                            errorBanner(msg)
                         }
 
-                        if !store.continueWatching().isEmpty {
-                            continueSection
-                        }
-
-                        categoryRow
-
-                        if store.isLoading && store.dramas.isEmpty {
+                        if feed.isLoading && feed.items.isEmpty {
                             loadingRow
                         }
 
-                        ForEach(filtered) { drama in
-                            DramaCard(drama: drama) {
-                                play(drama: drama)
-                            } onOpenDetail: {
-                                path.append(drama)
+                        ForEach(feed.items) { item in
+                            FeedCard(item: item) {
+                                play(item)
+                            } onDetail: {
+                                playerSeries = item
                             }
                             .padding(.horizontal, 16)
+                            .contextMenu {
+                                Button {
+                                    library.toggleFavorite(item)
+                                } label: {
+                                    Label(
+                                        library.isFavorite(item.seriesID) ? "取消收藏" : "收藏",
+                                        systemImage: library.isFavorite(item.seriesID)
+                                            ? "bookmark.slash" : "bookmark"
+                                    )
+                                }
+                                Button {
+                                    playerSeries = item
+                                } label: {
+                                    Label("播放", systemImage: "play.fill")
+                                }
+                            }
+                            .onAppear {
+                                if item.seriesID == feed.items.suffix(2).first?.seriesID {
+                                    Task { await feed.loadMore(config: settings.resolverConfig) }
+                                }
+                            }
                         }
 
-                        if filtered.isEmpty && !store.isLoading {
-                            EmptyStateView(icon: "film",
-                                           title: "这里还没有内容",
-                                           message: "换个分类看看，或在“我的 → 内容源”里填入你自己的 JSON 接口。")
+                        if feed.items.isEmpty && !feed.isLoading && feed.errorText == nil {
+                            EmptyStateView(
+                                icon: "sparkles.tv",
+                                title: "还没有内容",
+                                message: settings.hasResolver
+                                    ? "下拉刷新试试。"
+                                    : "先在「我的 → 解析服务」填好服务地址。"
+                            )
                         }
 
-                        Color.clear.frame(height: player.hasActiveItem ? 118 : 24)
+                        if !feed.items.isEmpty && !feed.hasMore {
+                            Text("— 已经到底了 —")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Palette.textTertiary)
+                                .padding(.vertical, 12)
+                        }
+
+                        Color.clear.frame(height: 24)
                     }
                     .padding(.top, 8)
                 }
                 .refreshable {
-                    await store.reloadAll()
+                    await feed.reload(config: settings.resolverConfig)
                 }
             }
             .navigationTitle("红果免广告")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: Drama.self) { drama in
-                DramaDetailView(drama: drama)
+            .task {
+                if feed.items.isEmpty {
+                    await feed.reload(config: settings.resolverConfig)
+                }
+            }
+            .onChange(of: settings.resolverBaseURL) { _, _ in
+                Task { await feed.reload(config: settings.resolverConfig) }
+            }
+            .fullScreenCover(item: $playerSeries) { item in
+                ResolverPlayerView(
+                    seriesID: item.seriesID,
+                    seriesTitle: item.title ?? "红果短剧"
+                )
+                .environmentObject(settings)
             }
         }
     }
 
-    // MARK: - 区块
+    // MARK: 头部
 
-    private var heroHeader: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Circle()
-                    .fill(Palette.accent)
-                    .frame(width: 6, height: 6)
-                Text("无广告 · 纯短剧")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Palette.textSecondary)
+                Image(systemName: "flame.fill")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(Palette.accent)
+                Text("红果短剧")
+                    .font(.system(size: 22, weight: .heavy))
+                    .foregroundStyle(Palette.textPrimary)
                 Spacer()
-                Text(store.activeSourceName)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.textTertiary)
-                    .lineLimit(1)
+                if settings.hasResolver {
+                    HStack(spacing: 4) {
+                        Circle().fill(.green).frame(width: 5, height: 5)
+                        Text("1080P")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Palette.textSecondary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Palette.surface)
+                    .clipShape(Capsule())
+                }
             }
-            Text("一口气追完整部剧")
-                .font(.system(size: 26, weight: .heavy, design: .rounded))
-                .foregroundStyle(Palette.textPrimary)
-            Text("没有开屏、没有插播、没有倒计时。")
-                .font(.system(size: 13))
+            Text("无开屏 · 无插播 · 全集合集")
+                .font(.system(size: 12))
                 .foregroundStyle(Palette.textSecondary)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
-                .fill(Palette.surface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
-                        .stroke(Palette.stroke, lineWidth: 1)
-                )
-        )
-        .padding(.horizontal, 16)
     }
 
-    private var continueSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "继续观看", subtitle: "接着上次的进度")
-                .padding(.horizontal, 16)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(store.continueWatching()) { item in
-                        Button {
-                            play(drama: item.drama, resume: item.record)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 6) {
-                                PosterView(title: item.drama.title, urlString: item.drama.coverURL)
-                                    .frame(width: 116, height: 156)
-                                    .overlay(alignment: .bottom) {
-                                        ProgressBar(value: item.record.progress)
-                                            .padding(6)
-                                    }
-                                Text(item.drama.title)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(Palette.textPrimary)
-                                    .lineLimit(1)
-                                    .frame(width: 116, alignment: .leading)
-                                Text("第 \(item.record.episodeIndex) 集")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(Palette.textTertiary)
-                            }
-                        }
-                        .buttonStyle(PressableStyle())
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-        }
-    }
+    // MARK: 分类
 
-    private var categoryRow: some View {
+    private var tabRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                Button {
-                    selectedCategory = nil
-                } label: {
-                    TagChip(text: "全部", highlighted: selectedCategory == nil)
-                }
-                .buttonStyle(PressableStyle())
-
-                ForEach(store.categories) { category in
+                ForEach(tabs, id: \.id) { t in
                     Button {
-                        selectedCategory = (selectedCategory == category.id) ? nil : category.id
+                        Task { await feed.selectTab(t.id) }
                     } label: {
-                        TagChip(text: category.title, highlighted: selectedCategory == category.id)
+                        Text(t.name)
+                            .font(.system(size: 13, weight: feed.tab == t.id ? .semibold : .regular))
+                            .foregroundStyle(feed.tab == t.id ? .white : Palette.textSecondary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(feed.tab == t.id ? Palette.accent : Palette.surface)
+                            .clipShape(Capsule())
                     }
-                    .buttonStyle(PressableStyle())
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 16)
         }
     }
 
-    private var loadingRow: some View {
-        VStack(spacing: 12) {
-            ForEach(0..<3, id: \.self) { _ in
-                RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
-                    .fill(Palette.surface)
-                    .frame(height: 150)
-                    .padding(.horizontal, 16)
-                    .redacted(reason: .placeholder)
-            }
-        }
-    }
+    // MARK: 状态
 
-    private func play(drama: Drama, resume: PlaybackRecord? = nil) {
-        let ordered = drama.episodes.sorted { $0.index < $1.index }
-        guard !ordered.isEmpty else { return }
-        if let resume,
-           let episode = drama.episodes.first(where: { $0.id == resume.episodeID }) {
-            player.play(drama: drama, episode: episode)
-        } else if let first = ordered.first {
-            player.play(drama: drama, episode: first)
-        }
-        player.isFullScreen = true
-        store.library.touchHistory(drama.id)
-    }
-}
-
-// MARK: - 组件
-
-struct PosterView: View {
-    let title: String
-    let urlString: String?
-
-    var body: some View {
-        GeometryReader { geo in
-            Group {
-                if let urlString, let url = URL(string: urlString), url.scheme?.hasPrefix("http") == true {
-                    AsyncImage(url: url, transaction: Transaction(animation: .easeInOut(duration: 0.2))) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image.resizable().scaledToFill()
-                        default:
-                            PosterPlaceholder(title: title)
-                        }
-                    }
-                } else {
-                    PosterPlaceholder(title: title)
-                }
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
-            .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: Radius.poster, style: .continuous))
-        }
-    }
-}
-
-struct ProgressBar: View {
-    let value: Double
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.25))
-                Capsule()
-                    .fill(Palette.accent)
-                    .frame(width: geo.size.width * CGFloat(max(0, min(1, value))))
-            }
-        }
-        .frame(height: 3)
-    }
-}
-
-struct DramaCard: View {
-    let drama: Drama
-    let onPlay: () -> Void
-    let onOpenDetail: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Button(action: onOpenDetail) {
-                PosterView(title: drama.title, urlString: drama.coverURL)
-                    .frame(width: 96, height: 132)
-                    .overlay(alignment: .topLeading) {
-                        if let rating = drama.rating {
-                            Text(String(format: "%.1f", rating))
-                                .font(.system(size: 10, weight: .heavy))
-                                .foregroundStyle(.black)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(Palette.gold))
-                                .padding(6)
-                        }
-                    }
-            }
-            .buttonStyle(PressableStyle())
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(drama.title)
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(1)
-
-                if !drama.displayTagline.isEmpty {
-                    Text(drama.displayTagline)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.textSecondary)
-                        .lineLimit(2)
-                }
-
-                HStack(spacing: 6) {
-                    Text("全 \(drama.episodeCount) 集")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Palette.accent)
-                    if !drama.heatText.isEmpty {
-                        Text("·").foregroundStyle(Palette.textTertiary)
-                        Text(drama.heatText)
-                            .font(.system(size: 11))
-                            .foregroundStyle(Palette.textTertiary)
-                    }
-                }
-
-                HStack(spacing: 6) {
-                    ForEach(Array(drama.displayTags.prefix(3)), id: \.self) { tag in
-                        TagChip(text: tag)
-                    }
-                }
-
-                Spacer(minLength: 4)
-
-                HStack(spacing: 8) {
-                    Button(action: onPlay) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 10, weight: .bold))
-                            Text("立即播放")
-                                .font(.system(size: 12, weight: .semibold))
-                        }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(Capsule().fill(Palette.accent))
-                    }
-                    .buttonStyle(PressableStyle())
-
-                    Button(action: onOpenDetail) {
-                        Text("选集")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Palette.textSecondary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(Capsule().fill(Color.white.opacity(0.07)))
-                    }
-                    .buttonStyle(PressableStyle())
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
-                .fill(Palette.surface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
-                        .stroke(Palette.stroke, lineWidth: 1)
-                )
-        )
-    }
-}
-
-struct ErrorBanner: View {
-    let message: String
-    let onRetry: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+    private func errorBanner(_ msg: String) -> some View {
+        HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(Palette.gold)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("内容源加载失败")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Palette.textPrimary)
-                Text(message)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.textSecondary)
-                    .lineLimit(3)
-            }
+            Text(msg)
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.textPrimary)
+                .lineLimit(3)
             Spacer()
-            Button("重试", action: onRetry)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Palette.accent)
+            Button("重试") {
+                Task { await feed.reload(config: settings.resolverConfig) }
+            }
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(Palette.accent)
         }
         .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: Radius.chip, style: .continuous)
-                .fill(Palette.gold.opacity(0.12))
-        )
+        .background(Palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal, 16)
+    }
+
+    private var loadingRow: some View {
+        VStack(spacing: 10) {
+            ProgressView().tint(Palette.accent)
+            Text("正在拉取真实剧库…")
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.textSecondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+    }
+
+    private func play(_ item: HGFeedItem) {
+        playerSeries = item
+    }
+}
+
+// MARK: - 卡片
+
+private struct FeedCard: View {
+    let item: HGFeedItem
+    let onPlay: () -> Void
+    let onDetail: () -> Void
+
+    var body: some View {
+        Button(action: onPlay) {
+            HStack(alignment: .top, spacing: 12) {
+                poster
+                info
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .background(Palette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var poster: some View {
+        ZStack(alignment: .bottomTrailing) {
+            AsyncImage(url: URL(string: item.cover ?? "")) { phase in
+                switch phase {
+                case .success(let img):
+                    img.resizable().aspectRatio(contentMode: .fill)
+                case .failure:
+                    placeholder
+                case .empty:
+                    placeholder.overlay(ProgressView().tint(.white.opacity(0.6)))
+                @unknown default:
+                    placeholder
+                }
+            }
+            .frame(width: 96, height: 132)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            if let c = item.episodeCount, c > 0 {
+                Text("\(c)集")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(.black.opacity(0.65))
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .padding(5)
+            }
+        }
+    }
+
+    private var placeholder: some View {
+        RoundedRectangle(cornerRadius: 10)
+            .fill(Palette.gradient(for: item.seriesID))
+            .overlay(
+                Text(String((item.title ?? "?").prefix(1)))
+                    .font(.system(size: 30, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.85))
+            )
+    }
+
+    private var info: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(item.title ?? "未命名")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Palette.textPrimary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+
+            if let tags = item.tags, !tags.isEmpty {
+                HStack(spacing: 4) {
+                    ForEach(tags.prefix(3), id: \.self) { t in
+                        Text(t)
+                            .font(.system(size: 9))
+                            .foregroundStyle(Palette.textSecondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Palette.background.opacity(0.6))
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                }
+            }
+
+            if let intro = item.intro, !intro.isEmpty {
+                Text(intro)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 8) {
+                if !item.playText.isEmpty {
+                    Label(item.playText, systemImage: "play.circle")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                Spacer()
+                HStack(spacing: 3) {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 8))
+                    Text("1080P")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+                .foregroundStyle(Palette.accent)
+            }
+        }
+        .frame(height: 132, alignment: .top)
     }
 }

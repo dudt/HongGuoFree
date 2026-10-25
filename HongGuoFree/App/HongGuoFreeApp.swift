@@ -14,100 +14,49 @@ struct HongGuoFreeApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
-                .environmentObject(container.store)
                 .environmentObject(container.settings)
-                .environmentObject(container.player)
-                .environmentObject(container.hongguo)
+                .environmentObject(container.feed)
+                .environmentObject(container.library)
                 .preferredColorScheme(.dark)
                 .tint(Palette.accent)
         }
     }
 }
 
-/// 统一创建并串联 AppStore / SettingsStore / PlayerEngine / HongGuoStore
-/// HongGuoStore 是 @MainActor 隔离的，所以容器整体放到主线程上下文，
-/// 否则 Xcode 16 / Swift 6 并发检查会报
-/// "call to main actor-isolated initializer in a synchronous nonisolated context"
+/// 依赖容器。HGFeedStore / HGLibraryStore 都是 @MainActor 隔离的，
+/// 所以整个容器放到主线程上下文（Xcode 16 并发检查要求）。
 @MainActor
 final class AppContainer: ObservableObject {
-    let store: AppStore
     let settings: SettingsStore
-    let player: PlayerEngine
-    let hongguo: HongGuoStore
+    let feed: HGFeedStore
+    let library: HGLibraryStore
 
     init() {
-        let store = AppStore()
-        let settings = SettingsStore()
-        store.attach(settings: settings)
-        self.store = store
-        self.settings = settings
-        self.player = PlayerEngine(store: store, settings: settings)
-        self.hongguo = HongGuoStore()
+        self.settings = SettingsStore()
+        self.feed = HGFeedStore()
+        self.library = HGLibraryStore()
     }
 }
 
 // MARK: - 根视图
 
 struct RootView: View {
-    @EnvironmentObject private var player: PlayerEngine
-    @EnvironmentObject private var store: AppStore
     @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var feed: HGFeedStore
+    @EnvironmentObject private var library: HGLibraryStore
 
     var body: some View {
         TabView {
             FeedView()
-                .withMiniPlayer()
-                .tabItem { Label("推荐", systemImage: "play.rectangle.on.rectangle") }
-
-            HongGuoHubView()
-                .withMiniPlayer()
-                .tabItem { Label("红果", systemImage: "flame.fill") }
-
-            SearchView()
-                .withMiniPlayer()
-                .tabItem { Label("发现", systemImage: "magnifyingglass") }
+                .tabItem { Label("首页", systemImage: "flame.fill") }
 
             LibraryView()
-                .withMiniPlayer()
                 .tabItem { Label("追剧", systemImage: "bookmark.fill") }
 
             SettingsView()
-                .withMiniPlayer()
                 .tabItem { Label("我的", systemImage: "person.crop.circle") }
         }
         .tint(Palette.accent)
-        .fullScreenCover(isPresented: Binding(
-            get: { player.isFullScreen },
-            set: { player.isFullScreen = $0 }
-        )) {
-            PlayerScreen()
-                .environmentObject(player)
-                .environmentObject(store)
-                .environmentObject(settings)
-        }
-        .task {
-            await store.reloadAll()
-        }
-    }
-}
-
-struct MiniPlayerInset: ViewModifier {
-    @EnvironmentObject private var player: PlayerEngine
-
-    func body(content: Content) -> some View {
-        content.safeAreaInset(edge: .bottom, spacing: 0) {
-            if player.hasActiveItem {
-                MiniPlayerBar()
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: player.hasActiveItem)
-    }
-}
-
-extension View {
-    func withMiniPlayer() -> some View {
-        modifier(MiniPlayerInset())
     }
 }
 

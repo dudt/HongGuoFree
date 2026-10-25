@@ -40,14 +40,12 @@ const WEB_UA =
   "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36";
 
 // 单次回传上限。
-// 注意：客户端（AVPlayer）会发 `bytes=0-<total-1>` 想一次拿完。
-// 如果我们私自截断到 1 MiB，Content-Range 就和它请求的不一致，
-// AVPlayer 会认为数据不全而卡住（黑屏 + 00:00）。
-// 这里放到 8 MiB：小文件一次给完，大文件才分片。
-const SEG_SIZE = 8 * 1024 * 1024;
+// 红果单集最大约 20 MB（1080P / 2~3 分钟），设 32 MiB 保证一集能一次性给完，
+// 避免 Content-Range 与客户端请求不一致导致 AVPlayer 卡住。
+const SEG_SIZE = 32 * 1024 * 1024;
 
 // 版本号：解密/头部处理逻辑有改动就 +1
-const SERVER_VERSION = "5";
+const SERVER_VERSION = "6";
 
 // ---------------------------------------------------------------- 工具
 
@@ -543,7 +541,8 @@ function decryptPartial(data, start, key, prepared) {
 // ---------------------------------------------------------------- 缓存
 
 const streamCache = new Map(); // vid -> { time, value }
-const infoCache = new Map();   // vid -> { time, value }
+const infoCache = new Map();   // seriesId -> { time, value }
+const discoverCache = new Map(); // tab:offset:count -> { time, value }
 const CACHE_TTL = 5 * 60 * 1000;
 
 function qualityNumber(v) {
@@ -646,6 +645,94 @@ async function warmStream(vid) {
   } catch {
     /* 忽略 */
   }
+}
+
+// ---------------------------------------------------------------- 发现页 / 详情
+
+/** App 端短剧商城 feed：只给 series_id/item_id，需要补详情 */
+async function mallFeed(tabType = 201, offset = 0, count = 20) {
+  const dev = freshDevice();
+  const url = `${API_HOST}/reading/playlet/shortbuy_api/get_mall_playlet_feed/v1/?${qs({
+    ...dev, tab_type: String(tabType), offset: String(offset), count: String(count),
+  })}`;
+  const { status, data } = await fetchText(url, { "User-Agent": APP_UA });
+  if (status !== 200) throw new Error(`mall_feed HTTP ${status}`);
+  const j = jsonBody(data.toString("utf8")) || {};
+  const cells = ((j.data || {}).cell_view || {}).cell_data || [];
+  const out = [];
+  for (const c of cells) {
+    const fmap = (((c.cell_extra_data || {}).rec_filter_info || {}).filter_id_map) || {};
+    const sid = seen(fmap.series_id);
+    const iid = seen(fmap.item_id);
+    if (!sid) continue;
+    // 顺手从 long_press_action 里挖标题/分类
+    const lp = (c.cell_long_press_action || {}).new_long_press_action_card_playlet || [];
+    let title = "";
+    const tags = [];
+    for (const it of lp) {
+      if (it.selection_head === "这个视频") title = seen(it.selection_text);
+      else if (it.selection_head === "分类") tags.push(seen(it.selection_text));
+      else if (it.selection_head === "视频类型") tags.push(seen(it.selection_text));
+    }
+    const style = c.style || {};
+    const epText = seen(style.episode_list_text);
+    out.push({ seriesId: sid, itemId: iid, title, tags, episodeText: epText });
+  }
+  return out;
+}
+
+/** 专辑详情（App 端 album_detail，album_id 必须是字符串） */
+async function albumDetail(seriesId) {
+  const dev = freshDevice();
+  const url = `${API_HOST}/novel/player/album_detail/v1/?${qs(dev)}`;
+  const { status, data } = await fetchText(
+    url,
+    { "User-Agent": APP_UA, "Content-Type": "application/json; charset=UTF-8" },
+    25000,
+    { method: "POST", body: JSON.stringify({ album_id: String(seriesId) }) }
+  );
+  if (status !== 200) throw new Error(`album_detail HTTP ${status}`);
+  const j = jsonBody(data.toString("utf8")) || {};
+  if (Number(j.code ?? -1) !== 0) return null;
+  return (j.data || {}).album_data || null;
+}
+
+/** 发现页：feed + 并发补详情 */
+async function discover(tabType, offset, count) {
+  const items = await mallFeed(tabType, offset, count);
+  // feed 有时返回重复卡片，按 seriesId 去重
+  const uniq = [];
+  const seenIds = new Set();
+  for (const it of items) {
+    if (seenIds.has(it.seriesId)) continue;
+    seenIds.add(it.seriesId);
+    uniq.push(it);
+  }
+  const enriched = await Promise.all(
+    uniq.map(async (it) => {
+      const [ad, sv] = await Promise.all([
+        albumDetail(it.seriesId).catch(() => null),
+        seriesVids(it.seriesId).catch(() => null),
+      ]);
+      const base = { ...it };
+      if (ad) {
+        base.title = it.title || seen(ad.title);
+        base.cover = seen(ad.cover);
+        base.intro = seen(ad.intro);
+        base.playCount = Number(ad.play_cnt || 0);
+        base.followedCount = Number(ad.followed_cnt || 0);
+        base.seriesStatus = Number(ad.series_status || 0);
+      }
+      if (sv) {
+        base.episodeCount = sv.vids.length;
+        base.freeEpisodes = sv.free;
+        if (!base.cover) base.cover = sv.cover;
+        if (!base.title) base.title = sv.title;
+      }
+      return base;
+    })
+  );
+  return enriched;
 }
 
 // ---------------------------------------------------------------- 网页端（拿全集清单）
@@ -767,6 +854,44 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // --- 发现页：真实短剧列表
+    if (path === "/api/discover") {
+      const tab = Number(url.searchParams.get("tab") || 201);
+      const offset = Number(url.searchParams.get("offset") || 0);
+      const count = Math.min(Number(url.searchParams.get("count") || 20), 20);
+      const key = `d:${tab}:${offset}:${count}`;
+      const hit = discoverCache.get(key);
+      let items;
+      if (hit && Date.now() - hit.time < CACHE_TTL) {
+        items = hit.value;
+      } else {
+        items = await discover(tab, offset, count);
+        discoverCache.set(key, { time: Date.now(), value: items });
+      }
+      sendJSON(res, 200, {
+        ok: true,
+        tab,
+        offset,
+        count: items.length,
+        has_more: items.length >= 6,
+        items: items.map((it) => ({
+          series_id: it.seriesId,
+          item_id: it.itemId,
+          title: it.title || "",
+          cover: it.cover || "",
+          intro: it.intro || "",
+          tags: it.tags || [],
+          episode_text: it.episodeText || "",
+          episode_count: it.episodeCount || 0,
+          free_episodes: it.freeEpisodes || 0,
+          play_count: it.playCount || 0,
+          followed_count: it.followedCount || 0,
+          detail_url: `/api/detail?series_id=${it.seriesId}`,
+        })),
+      });
+      return;
+    }
+
     // --- 剧集详情
     if (path === "/api/detail") {
       const sid = seen(url.searchParams.get("series_id"));
@@ -885,8 +1010,17 @@ const server = http.createServer(async (req, res) => {
       }
 
       // 有 Range：回 206
+      //
+      // 关键：客户端明确要的区间必须完整满足。
+      // AVPlayer 会发 `bytes=0-<total-1>` 想一次拿全；如果这里私自截断，
+      // Content-Range 与请求不一致，它会判定数据不全然后卡住（黑屏 + 00:00）。
+      // 只有客户端要的范围超过 SEG_SIZE 且不是「从 0 开始要全片」时才分片。
       const [start, rawEnd] = range;
-      const end = Math.min(rawEnd, start + SEG_SIZE - 1, total - 1);
+      const wantLen = rawEnd - start + 1;
+      const end = wantLen <= SEG_SIZE
+        ? Math.min(rawEnd, total - 1)
+        : Math.min(rawEnd, start + SEG_SIZE - 1, total - 1);
+
       const remote = await remoteRange(s.url, start, end);
       const plain = decryptPartial(
         remote.data, start,
@@ -894,8 +1028,6 @@ const server = http.createServer(async (req, res) => {
         s.prepared || { header: Buffer.alloc(0), samples: [] }
       );
 
-      // 客户端要「到文件末尾」且请求量不大时，直接给完整剩余部分，
-      // 少一轮往返；否则按 SEG_SIZE 分片。
       res.writeHead(206, {
         "Content-Type": "video/mp4",
         "Content-Length": plain.length,

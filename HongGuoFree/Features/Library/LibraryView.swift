@@ -1,42 +1,53 @@
-// 追剧页：收藏 + 观看历史
+// 追剧 / 历史
 import SwiftUI
 
 struct LibraryView: View {
-    @EnvironmentObject private var store: AppStore
-    @EnvironmentObject private var player: PlayerEngine
+    @EnvironmentObject private var library: HGLibraryStore
+    @EnvironmentObject private var settings: SettingsStore
 
     @State private var tab = 0
-    @State private var path: [Drama] = []
+    @State private var playing: HGRecord?
 
-    private var favorites: [Drama] { store.favorites }
-    private var history: [Drama] { store.historyDramas }
-    private var list: [Drama] { tab == 0 ? favorites : history }
+    private var list: [HGRecord] {
+        tab == 0 ? library.favorites : library.history
+    }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack {
             ZStack {
                 Palette.background.ignoresSafeArea()
 
                 ScrollView(.vertical, showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Picker("", selection: $tab) {
-                            Text("收藏 \(favorites.count)").tag(0)
-                            Text("历史 \(history.count)").tag(1)
-                        }
-                        .pickerStyle(.segmented)
-                        .padding(.horizontal, 16)
+                    VStack(spacing: 16) {
+                        segmented
 
                         if list.isEmpty {
-                            EmptyStateView(icon: tab == 0 ? "bookmark" : "clock.arrow.circlepath",
-                                           title: tab == 0 ? "还没有收藏" : "还没有观看记录",
-                                           message: tab == 0
-                                                 ? "在详情页点右上角的书签，就能把剧集存到这里。"
-                                                 : "看过的短剧会自动出现在这里，方便接着追。")
+                            EmptyStateView(
+                                icon: tab == 0 ? "bookmark" : "clock.arrow.circlepath",
+                                title: tab == 0 ? "还没有追剧" : "还没有观看记录",
+                                message: tab == 0
+                                    ? "在首页长按或进入详情页可以收藏。"
+                                    : "看过的短剧会出现在这里。"
+                            )
+                            .padding(.top, 60)
                         } else {
-                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3),
-                                      spacing: 16) {
-                                ForEach(list) { drama in
-                                    gridCell(drama)
+                            LazyVGrid(
+                                columns: [GridItem(.adaptive(minimum: 104), spacing: 12)],
+                                spacing: 16
+                            ) {
+                                ForEach(list) { rec in
+                                    Button { playing = rec } label: {
+                                        cell(rec)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .contextMenu {
+                                        Button(role: .destructive) {
+                                            if tab == 0 { library.removeFavorite(rec.seriesID) }
+                                            else { library.removeHistory(rec.seriesID) }
+                                        } label: {
+                                            Label("移除", systemImage: "trash")
+                                        }
+                                    }
                                 }
                             }
                             .padding(.horizontal, 16)
@@ -49,58 +60,95 @@ struct LibraryView: View {
             }
             .navigationTitle("追剧")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: Drama.self) { drama in
-                DramaDetailView(drama: drama)
-            }
-        }
-    }
-
-    private func gridCell(_ drama: Drama) -> some View {
-        Button {
-            path.append(drama)
-        } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                PosterView(title: drama.title, urlString: drama.coverURL)
-                    .frame(height: 150)
-                    .overlay(alignment: .bottomLeading) {
-                        if let record = store.library.record(for: drama.id) {
-                            ProgressBar(value: record.progress)
-                                .padding(6)
-                        }
+            .toolbar {
+                if tab == 1 && !library.history.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("清空") { library.clearHistory() }
+                            .font(.system(size: 13))
                     }
-                Text(drama.title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Palette.textPrimary)
-                    .lineLimit(1)
-                Text("全 \(drama.episodeCount) 集")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Palette.textTertiary)
+                }
             }
-        }
-        .buttonStyle(PressableStyle())
-        .contextMenu {
-            Button {
-                play(from: drama)
-            } label: {
-                Label("立即播放", systemImage: "play.fill")
-            }
-            Button {
-                store.library.toggleFavorite(drama.id)
-            } label: {
-                Label(store.library.isFavorite(drama.id) ? "取消收藏" : "加入收藏",
-                      systemImage: store.library.isFavorite(drama.id) ? "bookmark.slash" : "bookmark")
-            }
-            Button(role: .destructive) {
-                store.library.clearProgress(for: drama.id)
-            } label: {
-                Label("清除播放进度", systemImage: "trash")
+            .fullScreenCover(item: $playing) { rec in
+                ResolverPlayerView(
+                    seriesID: rec.seriesID,
+                    seriesTitle: rec.title,
+                    startIndex: rec.lastEpisode ?? 1
+                )
+                .environmentObject(settings)
             }
         }
     }
 
-    private func play(from drama: Drama) {
-        guard let first = drama.episodes.sorted(by: { $0.index < $1.index }).first else { return }
-        player.play(drama: drama, episode: first)
-        player.isFullScreen = true
+    private var segmented: some View {
+        HStack(spacing: 0) {
+            ForEach(0..<2, id: \.self) { i in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) { tab = i }
+                } label: {
+                    VStack(spacing: 6) {
+                        Text(i == 0 ? "收藏 \(library.favorites.count)"
+                                    : "历史 \(library.history.count)")
+                            .font(.system(size: 13, weight: tab == i ? .semibold : .regular))
+                            .foregroundStyle(tab == i ? Palette.textPrimary : Palette.textSecondary)
+                        Rectangle()
+                            .fill(tab == i ? Palette.accent : .clear)
+                            .frame(height: 2)
+                            .clipShape(Capsule())
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private func cell(_ rec: HGRecord) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack(alignment: .bottomTrailing) {
+                AsyncImage(url: URL(string: rec.cover ?? "")) { phase in
+                    switch phase {
+                    case .success(let img):
+                        img.resizable().aspectRatio(contentMode: .fill)
+                    case .failure:
+                        placeholder(rec)
+                    case .empty:
+                        placeholder(rec).overlay(ProgressView().tint(.white.opacity(0.5)))
+                    @unknown default:
+                        placeholder(rec)
+                    }
+                }
+                .frame(height: 148)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                if let ep = rec.lastEpisode {
+                    Text("看到 \(ep)")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(.black.opacity(0.7))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .padding(5)
+                }
+            }
+            Text(rec.title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Palette.textPrimary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+        }
+    }
+
+    private func placeholder(_ rec: HGRecord) -> some View {
+        RoundedRectangle(cornerRadius: 10)
+            .fill(Palette.gradient(for: rec.seriesID))
+            .overlay(
+                Text(String(rec.title.prefix(1)))
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.85))
+            )
     }
 }
