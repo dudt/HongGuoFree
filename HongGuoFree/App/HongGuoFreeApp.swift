@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 
 @main
+@MainActor
 struct HongGuoFreeApp: App {
     @StateObject private var container = AppContainer()
 
@@ -24,6 +25,10 @@ struct HongGuoFreeApp: App {
 }
 
 /// 统一创建并串联 AppStore / SettingsStore / PlayerEngine / HongGuoStore
+/// HongGuoStore 是 @MainActor 隔离的，所以容器整体放到主线程上下文，
+/// 否则 Xcode 16 / Swift 6 并发检查会报
+/// "call to main actor-isolated initializer in a synchronous nonisolated context"
+@MainActor
 final class AppContainer: ObservableObject {
     let store: AppStore
     let settings: SettingsStore
@@ -107,6 +112,7 @@ extension View {
 }
 
 enum Appearance {
+    @MainActor
     static func apply() {
         let nav = UINavigationBarAppearance()
         nav.configureWithOpaqueBackground()
