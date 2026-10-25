@@ -435,6 +435,40 @@ function replaceSinf(data) {
   }
 }
 
+/**
+ * 把 sample auxiliary information 的 box 改成 free。
+ *
+ * senc / saiz / saio 里存的是「每样本的 IV + 加密标志」。
+ * 我们已经把样本解成明文，这些表就失效了；而 sinf 被清掉后，
+ * AVPlayer 看到 senc 会尝试走加密路径，但找不到加密描述，
+ * 结果是 item.status 永远停在 .unknown —— 表现为黑屏 + 00:00。
+ *
+ * 注意：senc 必须整块清零（不能只改 fourcc），
+ * 否则残留的 IV 数据会被误读成别的 box。
+ */
+function blankAuxBoxes(data) {
+  for (const name of ["senc", "saiz", "saio"]) {
+    let off = 0;
+    const needle = Buffer.from(name);
+    while ((off = data.indexOf(needle, off)) >= 0) {
+      if (off < 4) {
+        off += 4;
+        continue;
+      }
+      const size = data.readUInt32BE(off - 4);
+      const end = off - 4 + size;
+      // 只处理合理的 box，避免误伤字符串里的偶然匹配
+      if (size >= 8 && size <= data.length && end <= data.length) {
+        data.write("free", off, "ascii");
+        data.fill(0, off + 4, end);
+        off = end;
+      } else {
+        off += 4;
+      }
+    }
+  }
+}
+
 function prepareCencHeader(data, key) {
   const ftypSize = data.readUInt32BE(0);
   const moov = readBox(data, ftypSize);
@@ -454,6 +488,9 @@ function prepareCencHeader(data, key) {
   replaceFourcc(header, "encv", "hvc1");
   replaceFourcc(header, "enca", "mp4a");
   replaceSinf(header);
+  // senc/saiz/saio 也必须清掉：样本已解密，这些加密辅助表会让
+  // AVPlayer 误判为加密流并卡在 .unknown（黑屏 + 00:00）
+  blankAuxBoxes(header);
   return { header, samples };
 }
 
