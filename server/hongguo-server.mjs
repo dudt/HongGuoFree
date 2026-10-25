@@ -39,10 +39,15 @@ const APP_UA =
 const WEB_UA =
   "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36";
 
-const SEG_SIZE = 1024 * 1024; // 单次回传上限
+// 单次回传上限。
+// 注意：客户端（AVPlayer）会发 `bytes=0-<total-1>` 想一次拿完。
+// 如果我们私自截断到 1 MiB，Content-Range 就和它请求的不一致，
+// AVPlayer 会认为数据不全而卡住（黑屏 + 00:00）。
+// 这里放到 8 MiB：小文件一次给完，大文件才分片。
+const SEG_SIZE = 8 * 1024 * 1024;
 
 // 版本号：解密/头部处理逻辑有改动就 +1
-const SERVER_VERSION = "4";
+const SERVER_VERSION = "5";
 
 // ---------------------------------------------------------------- 工具
 
