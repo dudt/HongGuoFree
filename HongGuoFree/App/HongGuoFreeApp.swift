@@ -16,17 +16,19 @@ struct HongGuoFreeApp: App {
                 .environmentObject(container.store)
                 .environmentObject(container.settings)
                 .environmentObject(container.player)
+                .environmentObject(container.hongguo)
                 .preferredColorScheme(.dark)
                 .tint(Palette.accent)
         }
     }
 }
 
-/// 统一创建并串联 AppStore / SettingsStore / PlayerEngine
+/// 统一创建并串联 AppStore / SettingsStore / PlayerEngine / HongGuoStore
 final class AppContainer: ObservableObject {
     let store: AppStore
     let settings: SettingsStore
     let player: PlayerEngine
+    let hongguo: HongGuoStore
 
     init() {
         let store = AppStore()
@@ -35,6 +37,7 @@ final class AppContainer: ObservableObject {
         self.store = store
         self.settings = settings
         self.player = PlayerEngine(store: store, settings: settings)
+        self.hongguo = HongGuoStore()
     }
 }
 
@@ -50,6 +53,10 @@ struct RootView: View {
             FeedView()
                 .withMiniPlayer()
                 .tabItem { Label("推荐", systemImage: "play.rectangle.on.rectangle") }
+
+            HongGuoHubView()
+                .withMiniPlayer()
+                .tabItem { Label("红果", systemImage: "flame.fill") }
 
             SearchView()
                 .withMiniPlayer()

@@ -132,7 +132,7 @@ def check_yaml() -> None:
 # ---------------------------------------------------------------- 4. Swift 括号
 
 def strip_swift_noise(text: str) -> str:
-    """去掉注释与字符串字面量，只留结构性字符。"""
+    """去掉注释与字符串字面量，只留结构性字符。支持 #"..."# 原始字符串。"""
     out: list[str] = []
     i, n = 0, len(text)
     while i < n:
@@ -157,6 +157,29 @@ def strip_swift_noise(text: str) -> str:
                 else:
                     i += 1
             continue
+        # 原始字符串 #"..."# / ##"..."## / #"""..."""#
+        if ch == "#":
+            j = i
+            while j < n and text[j] == "#":
+                j += 1
+            hashes = j - i
+            if j < n and text[j] == '"':
+                closing = '"' + "#" * hashes
+                # 多行原始字符串
+                if text.startswith('"""', j):
+                    i = j + 3
+                    while i < n and not text.startswith('"""' + "#" * hashes, i):
+                        i += 1
+                    i += 3 + hashes
+                else:
+                    i = j + 1
+                    while i < n:
+                        if text.startswith(closing, i):
+                            i += len(closing)
+                            break
+                        i += 1
+                out.append('""')
+                continue
         # 多行字符串 """
         if text.startswith('"""', i):
             i += 3
@@ -178,7 +201,6 @@ def strip_swift_noise(text: str) -> str:
                 i += 1
             out.append('""')
             continue
-        # 字符/插值里的 \( ) 已在字符串处理中跳过
         out.append(ch)
         i += 1
     return "".join(out)
