@@ -126,18 +126,30 @@ struct HGServerClient {
     }
 
     /// 拼一个绝对 URL（服务端返回的是相对路径 /api/stream?vid=xxx）
+    ///
+    /// 注意：不能用 `appendingPathComponent` —— 它会把整串当成单个路径段，
+    /// 把 `?` 编码成 `%3F`，服务端就匹配不上路由了（表现为 404 未知接口）。
+    /// 这里直接拼字符串，只对 token 做转义。
     func absolute(_ path: String) -> URL? {
         guard let base = config.normalized else { return nil }
+
         var s = path
         if s.hasPrefix("/") { s.removeFirst() }
-        guard var comps = URLComponents(url: base.appendingPathComponent(s),
-                                       resolvingAgainstBaseURL: false) else { return nil }
+
+        var baseStr = base.absoluteString
+        while baseStr.hasSuffix("/") { baseStr.removeLast() }
+
+        var full = baseStr + "/" + s
+
         if !config.token.isEmpty {
-            var items = comps.queryItems ?? []
-            items.append(URLQueryItem(name: "token", value: config.token))
-            comps.queryItems = items
+            let sep = full.contains("?") ? "&" : "?"
+            let escaped = config.token
+                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
+                ?? config.token
+            full += "\(sep)token=\(escaped)"
         }
-        return comps.url
+
+        return URL(string: full)
     }
 
     // MARK: 剧集详情
