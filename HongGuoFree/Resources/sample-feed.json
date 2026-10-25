@@ -1,0 +1,3277 @@
+{
+  "version": 1,
+  "name": "本地演示内容",
+  "updatedAt": "2026-01-01T00:00:00Z",
+  "categories": [
+    {
+      "id": "hot",
+      "title": "热播",
+      "systemImage": "flame.fill"
+    },
+    {
+      "id": "rebirth",
+      "title": "重生",
+      "systemImage": "arrow.triangle.2.circlepath"
+    },
+    {
+      "id": "sweet",
+      "title": "甜宠",
+      "systemImage": "heart.fill"
+    },
+    {
+      "id": "ancient",
+      "title": "古装",
+      "systemImage": "crown.fill"
+    },
+    {
+      "id": "mystery",
+      "title": "悬疑",
+      "systemImage": "moon.stars.fill"
+    }
+  ],
+  "dramas": [
+    {
+      "id": "demo-rebirth-ceo",
+      "title": "重生之我在豪门当团宠",
+      "tagline": "被扫地出门的养女，一朝重生，把欺负过她的人一个个请下神坛。",
+      "synopsis": "林知夏在豪门当了十八年“多余的人”，重生回被赶出家门那天。这一次，她不再讨好任何人，先把属于自己的一分不少拿回来。",
+      "tags": [
+        "重生",
+        "逆袭",
+        "豪门"
+      ],
+      "categoryIDs": [
+        "rebirth",
+        "hot"
+      ],
+      "coverURL": null,
+      "playCount": 12860000,
+      "rating": 9.2,
+      "isFinished": true,
+      "episodes": [
+        {
+          "id": "demo-rebirth-ceo-1",
+          "index": 1,
+          "title": "第 1 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-2",
+          "index": 2,
+          "title": "第 2 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-3",
+          "index": 3,
+          "title": "第 3 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-4",
+          "index": 4,
+          "title": "第 4 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-5",
+          "index": 5,
+          "title": "第 5 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-6",
+          "index": 6,
+          "title": "第 6 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-7",
+          "index": 7,
+          "title": "第 7 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-8",
+          "index": 8,
+          "title": "第 8 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-9",
+          "index": 9,
+          "title": "第 9 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-10",
+          "index": 10,
+          "title": "第 10 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-11",
+          "index": 11,
+          "title": "第 11 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-12",
+          "index": 12,
+          "title": "第 12 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-13",
+          "index": 13,
+          "title": "第 13 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-14",
+          "index": 14,
+          "title": "第 14 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-15",
+          "index": 15,
+          "title": "第 15 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-16",
+          "index": 16,
+          "title": "第 16 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-17",
+          "index": 17,
+          "title": "第 17 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-18",
+          "index": 18,
+          "title": "第 18 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-19",
+          "index": 19,
+          "title": "第 19 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-20",
+          "index": 20,
+          "title": "第 20 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-21",
+          "index": 21,
+          "title": "第 21 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-22",
+          "index": 22,
+          "title": "第 22 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-23",
+          "index": 23,
+          "title": "第 23 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-24",
+          "index": 24,
+          "title": "第 24 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-25",
+          "index": 25,
+          "title": "第 25 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-26",
+          "index": 26,
+          "title": "第 26 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-27",
+          "index": 27,
+          "title": "第 27 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-28",
+          "index": 28,
+          "title": "第 28 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-29",
+          "index": 29,
+          "title": "第 29 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-rebirth-ceo-30",
+          "index": 30,
+          "title": "第 30 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "demo-ceo-contract",
+      "title": "总裁的契约小娇妻",
+      "tagline": "一纸婚约三年为期，谁先动心谁认输。",
+      "synopsis": "为了救弟弟，苏晚签下了那份荒唐的契约。三年里她努力扮演合格的“陆太太”，却在最后一晚听见他说：不许走。",
+      "tags": [
+        "总裁",
+        "甜宠",
+        "契约"
+      ],
+      "categoryIDs": [
+        "sweet",
+        "hot"
+      ],
+      "coverURL": null,
+      "playCount": 9420000,
+      "rating": 8.8,
+      "isFinished": false,
+      "episodes": [
+        {
+          "id": "demo-ceo-contract-1",
+          "index": 1,
+          "title": "第 1 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-2",
+          "index": 2,
+          "title": "第 2 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-3",
+          "index": 3,
+          "title": "第 3 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-4",
+          "index": 4,
+          "title": "第 4 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-5",
+          "index": 5,
+          "title": "第 5 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-6",
+          "index": 6,
+          "title": "第 6 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-7",
+          "index": 7,
+          "title": "第 7 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-8",
+          "index": 8,
+          "title": "第 8 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-9",
+          "index": 9,
+          "title": "第 9 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-10",
+          "index": 10,
+          "title": "第 10 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-11",
+          "index": 11,
+          "title": "第 11 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-12",
+          "index": 12,
+          "title": "第 12 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-13",
+          "index": 13,
+          "title": "第 13 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-14",
+          "index": 14,
+          "title": "第 14 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-15",
+          "index": 15,
+          "title": "第 15 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-16",
+          "index": 16,
+          "title": "第 16 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-17",
+          "index": 17,
+          "title": "第 17 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-18",
+          "index": 18,
+          "title": "第 18 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-19",
+          "index": 19,
+          "title": "第 19 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-20",
+          "index": 20,
+          "title": "第 20 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-21",
+          "index": 21,
+          "title": "第 21 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-22",
+          "index": 22,
+          "title": "第 22 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-23",
+          "index": 23,
+          "title": "第 23 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ceo-contract-24",
+          "index": 24,
+          "title": "第 24 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "demo-ancient-doctor",
+      "title": "神医小娘子",
+      "tagline": "现代医生穿成落魄农女，一根银针救活半个县城。",
+      "synopsis": "外科医生顾清穿成被退婚的农女，家里只有三亩薄田和一个病秧子弟弟。她靠一手医术从摆摊开始，最后开出了县城最大的药堂。",
+      "tags": [
+        "古装",
+        "医术",
+        "励志"
+      ],
+      "categoryIDs": [
+        "ancient"
+      ],
+      "coverURL": null,
+      "playCount": 7130000,
+      "rating": 9.0,
+      "isFinished": true,
+      "episodes": [
+        {
+          "id": "demo-ancient-doctor-1",
+          "index": 1,
+          "title": "第 1 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-2",
+          "index": 2,
+          "title": "第 2 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-3",
+          "index": 3,
+          "title": "第 3 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-4",
+          "index": 4,
+          "title": "第 4 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-5",
+          "index": 5,
+          "title": "第 5 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-6",
+          "index": 6,
+          "title": "第 6 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-7",
+          "index": 7,
+          "title": "第 7 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-8",
+          "index": 8,
+          "title": "第 8 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-9",
+          "index": 9,
+          "title": "第 9 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-10",
+          "index": 10,
+          "title": "第 10 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-11",
+          "index": 11,
+          "title": "第 11 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-12",
+          "index": 12,
+          "title": "第 12 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-13",
+          "index": 13,
+          "title": "第 13 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-14",
+          "index": 14,
+          "title": "第 14 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-15",
+          "index": 15,
+          "title": "第 15 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-16",
+          "index": 16,
+          "title": "第 16 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-17",
+          "index": 17,
+          "title": "第 17 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-18",
+          "index": 18,
+          "title": "第 18 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-19",
+          "index": 19,
+          "title": "第 19 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-20",
+          "index": 20,
+          "title": "第 20 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-21",
+          "index": 21,
+          "title": "第 21 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-22",
+          "index": 22,
+          "title": "第 22 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-23",
+          "index": 23,
+          "title": "第 23 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-24",
+          "index": 24,
+          "title": "第 24 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-25",
+          "index": 25,
+          "title": "第 25 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-26",
+          "index": 26,
+          "title": "第 26 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-27",
+          "index": 27,
+          "title": "第 27 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-28",
+          "index": 28,
+          "title": "第 28 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-29",
+          "index": 29,
+          "title": "第 29 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-30",
+          "index": 30,
+          "title": "第 30 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-31",
+          "index": 31,
+          "title": "第 31 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-32",
+          "index": 32,
+          "title": "第 32 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-33",
+          "index": 33,
+          "title": "第 33 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-34",
+          "index": 34,
+          "title": "第 34 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-35",
+          "index": 35,
+          "title": "第 35 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-ancient-doctor-36",
+          "index": 36,
+          "title": "第 36 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "demo-mystery-hotel",
+      "title": "深夜旅馆的第 13 号房",
+      "tagline": "每个住进 13 号房的人，第二天都会忘记自己来过。",
+      "synopsis": "记者程野为了查清哥哥失踪的真相，住进了那间不存在的房间。门锁落下的那一刻，他听见有人在墙里数数。",
+      "tags": [
+        "悬疑",
+        "烧脑",
+        "现代"
+      ],
+      "categoryIDs": [
+        "mystery"
+      ],
+      "coverURL": null,
+      "playCount": 5610000,
+      "rating": 8.5,
+      "isFinished": false,
+      "episodes": [
+        {
+          "id": "demo-mystery-hotel-1",
+          "index": 1,
+          "title": "第 1 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-mystery-hotel-2",
+          "index": 2,
+          "title": "第 2 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-mystery-hotel-3",
+          "index": 3,
+          "title": "第 3 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-mystery-hotel-4",
+          "index": 4,
+          "title": "第 4 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-mystery-hotel-5",
+          "index": 5,
+          "title": "第 5 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-mystery-hotel-6",
+          "index": 6,
+          "title": "第 6 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-mystery-hotel-7",
+          "index": 7,
+          "title": "第 7 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-mystery-hotel-8",
+          "index": 8,
+          "title": "第 8 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-mystery-hotel-9",
+          "index": 9,
+          "title": "第 9 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-mystery-hotel-10",
+          "index": 10,
+          "title": "第 10 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-mystery-hotel-11",
+          "index": 11,
+          "title": "第 11 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-mystery-hotel-12",
+          "index": 12,
+          "title": "第 12 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-mystery-hotel-13",
+          "index": 13,
+          "title": "第 13 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-mystery-hotel-14",
+          "index": 14,
+          "title": "第 14 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-mystery-hotel-15",
+          "index": 15,
+          "title": "第 15 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-mystery-hotel-16",
+          "index": 16,
+          "title": "第 16 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-mystery-hotel-17",
+          "index": 17,
+          "title": "第 17 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-mystery-hotel-18",
+          "index": 18,
+          "title": "第 18 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "demo-sweet-campus",
+      "title": "同桌，借个心",
+      "tagline": "全校第一的笔记本上，只写了你的名字。",
+      "synopsis": "转学第一天，夏梧就被安排坐在年级第一旁边。她以为对方高冷，直到发现他的错题本里夹满了她随手画的涂鸦。",
+      "tags": [
+        "校园",
+        "甜宠",
+        "青春"
+      ],
+      "categoryIDs": [
+        "sweet"
+      ],
+      "coverURL": null,
+      "playCount": 4380000,
+      "rating": 8.9,
+      "isFinished": true,
+      "episodes": [
+        {
+          "id": "demo-sweet-campus-1",
+          "index": 1,
+          "title": "第 1 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-sweet-campus-2",
+          "index": 2,
+          "title": "第 2 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-sweet-campus-3",
+          "index": 3,
+          "title": "第 3 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-sweet-campus-4",
+          "index": 4,
+          "title": "第 4 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-sweet-campus-5",
+          "index": 5,
+          "title": "第 5 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-sweet-campus-6",
+          "index": 6,
+          "title": "第 6 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-sweet-campus-7",
+          "index": 7,
+          "title": "第 7 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-sweet-campus-8",
+          "index": 8,
+          "title": "第 8 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-sweet-campus-9",
+          "index": 9,
+          "title": "第 9 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-sweet-campus-10",
+          "index": 10,
+          "title": "第 10 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-sweet-campus-11",
+          "index": 11,
+          "title": "第 11 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-sweet-campus-12",
+          "index": 12,
+          "title": "第 12 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-sweet-campus-13",
+          "index": 13,
+          "title": "第 13 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-sweet-campus-14",
+          "index": 14,
+          "title": "第 14 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-sweet-campus-15",
+          "index": 15,
+          "title": "第 15 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-sweet-campus-16",
+          "index": 16,
+          "title": "第 16 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-sweet-campus-17",
+          "index": 17,
+          "title": "第 17 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-sweet-campus-18",
+          "index": 18,
+          "title": "第 18 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-sweet-campus-19",
+          "index": 19,
+          "title": "第 19 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-sweet-campus-20",
+          "index": 20,
+          "title": "第 20 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "demo-warrior-return",
+      "title": "战神归来只想种田",
+      "tagline": "打完最后一场仗，他只想回家给女儿做顿饭。",
+      "synopsis": "退役战神江野回到小县城，只想安静种地养娃。可当年的仇家、现在的对手，都不肯让他如愿。",
+      "tags": [
+        "逆袭",
+        "热血",
+        "现代"
+      ],
+      "categoryIDs": [
+        "hot",
+        "mystery"
+      ],
+      "coverURL": null,
+      "playCount": 3120000,
+      "rating": 8.1,
+      "isFinished": false,
+      "episodes": [
+        {
+          "id": "demo-warrior-return-1",
+          "index": 1,
+          "title": "第 1 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-2",
+          "index": 2,
+          "title": "第 2 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-3",
+          "index": 3,
+          "title": "第 3 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-4",
+          "index": 4,
+          "title": "第 4 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-5",
+          "index": 5,
+          "title": "第 5 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-6",
+          "index": 6,
+          "title": "第 6 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-7",
+          "index": 7,
+          "title": "第 7 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-8",
+          "index": 8,
+          "title": "第 8 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-9",
+          "index": 9,
+          "title": "第 9 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-10",
+          "index": 10,
+          "title": "第 10 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-11",
+          "index": 11,
+          "title": "第 11 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-12",
+          "index": 12,
+          "title": "第 12 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-13",
+          "index": 13,
+          "title": "第 13 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-14",
+          "index": 14,
+          "title": "第 14 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-15",
+          "index": 15,
+          "title": "第 15 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-16",
+          "index": 16,
+          "title": "第 16 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-17",
+          "index": 17,
+          "title": "第 17 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-18",
+          "index": 18,
+          "title": "第 18 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-19",
+          "index": 19,
+          "title": "第 19 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-20",
+          "index": 20,
+          "title": "第 20 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-21",
+          "index": 21,
+          "title": "第 21 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-22",
+          "index": 22,
+          "title": "第 22 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-23",
+          "index": 23,
+          "title": "第 23 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-24",
+          "index": 24,
+          "title": "第 24 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-25",
+          "index": 25,
+          "title": "第 25 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-26",
+          "index": 26,
+          "title": "第 26 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-27",
+          "index": 27,
+          "title": "第 27 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+              "quality": "1080P",
+              "kind": "mp4",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        },
+        {
+          "id": "demo-warrior-return-28",
+          "index": 28,
+          "title": "第 28 集",
+          "duration": 0,
+          "sources": [
+            {
+              "url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
+              "quality": "1080P",
+              "kind": "hls",
+              "priority": 10
+            },
+            {
+              "url": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+              "quality": "720P",
+              "kind": "mp4",
+              "priority": 5
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

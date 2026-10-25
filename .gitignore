@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# Xcode / XcodeGen
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+build/
+DerivedData/
+*.xcactivitylog
+
+# 本地产物
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.p12
+*.mobileprovision
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+
+# Python
+__pycache__/
+*.pyc
+.venv/

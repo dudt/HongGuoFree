@@ -1,0 +1,14 @@
+# 统一换行符，避免 Windows 上提交后脚本在 CI 里报错
+* text=auto eol=lf
+
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.py text eol=lf
+*.swift text eol=lf
+*.json text eol=lf
+
+*.png binary
+*.ipa binary
+*.p12 binary
+*.mobileprovision binary

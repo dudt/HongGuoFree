@@ -1,0 +1,221 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [ main, master ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      bundle_id:
+        description: 'Bundle ID（留空使用默认 com.hongguofree.app）'
+        required: false
+        default: ''
+      export_method:
+        description: '签名方式（仅在配置了证书 secrets 时生效）'
+        required: false
+        default: 'development'
+        type: choice
+        options:
+          - development
+          - ad-hoc
+          - enterprise
+          - app-store
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build & Package IPA
+    runs-on: macos-14
+    timeout-minutes: 40
+    env:
+      SCHEME: HongGuoFree
+      PROJECT: HongGuoFree.xcodeproj
+      BUNDLE_ID: ${{ inputs.bundle_id || 'com.hongguofree.app' }}
+      EXPORT_METHOD: ${{ inputs.export_method || 'development' }}
+      HAS_SIGNING: ${{ secrets.BUILD_CERTIFICATE_BASE64 != '' && secrets.PROVISIONING_PROFILE_BASE64 != '' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          sw_vers
+
+      - name: Install XcodeGen
+        run: |
+          brew update >/dev/null 2>&1 || true
+          brew install xcodegen
+          xcodegen --version
+
+      - name: Generate Xcode project
+        run: |
+          xcodegen generate --spec project.yml
+          xcodebuild -list -project "$PROJECT"
+
+      - name: Build unsigned app
+        run: |
+          set -o pipefail
+          mkdir -p build
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build/DerivedData \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            build 2>&1 | tee build/xcodebuild.log
+
+      - name: Verify .app
+        run: |
+          set -euo pipefail
+          APP_PATH="build/DerivedData/Build/Products/Release-iphoneos/$SCHEME.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::找不到 $APP_PATH"
+            ls -R build/DerivedData/Build/Products || true
+            exit 1
+          fi
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist"
+          file "$APP_PATH/$SCHEME" || true
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          rm -rf build/Payload build/unsigned
+          mkdir -p build/Payload build/unsigned
+          cp -R "$APP_PATH" build/Payload/
+          # 未签名包需要清掉签名残留，否则部分安装器会报错
+          rm -rf "build/Payload/$SCHEME.app/_CodeSignature" || true
+          (cd build && /usr/bin/zip -qry "unsigned/HongGuoFree-unsigned.ipa" Payload)
+          ls -lh build/unsigned
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: HongGuoFree-unsigned-ipa
+          path: build/unsigned/*.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      # ---------- 以下步骤仅在配置了签名 secrets 时执行 ----------
+
+      - name: Import signing certificate
+        if: env.HAS_SIGNING == 'true'
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          PROVISIONING_PROFILE_BASE64: ${{ secrets.PROVISIONING_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          CERT_PATH="$RUNNER_TEMP/cert.p12"
+          PROFILE_PATH="$RUNNER_TEMP/profile.mobileprovision"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 -D -o "$CERT_PATH"
+          echo -n "$PROVISIONING_PROFILE_BASE64" | base64 -D -o "$PROFILE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/"
+
+          security cms -D -i "$PROFILE_PATH" > "$RUNNER_TEMP/profile.plist"
+          /usr/libexec/PlistBuddy -x -c 'Print :Entitlements' "$RUNNER_TEMP/profile.plist" > "$RUNNER_TEMP/entitlements.plist"
+          /usr/libexec/PlistBuddy -c 'Print :Name' "$RUNNER_TEMP/profile.plist" || true
+          /usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$RUNNER_TEMP/profile.plist" || true
+
+      - name: Re-sign IPA
+        if: env.HAS_SIGNING == 'true'
+        env:
+          SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          IDENTITY="${SIGNING_IDENTITY:-}"
+          if [ -z "$IDENTITY" ]; then
+            IDENTITY=$(security find-identity -v -p codesigning "$RUNNER_TEMP/app-signing.keychain-db" | head -1 | sed -E 's/.*"(.*)"/\1/')
+          fi
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::没有找到可用的代码签名证书"
+            exit 1
+          fi
+          echo "使用证书：$IDENTITY"
+
+          APP_DIR="build/Payload/$SCHEME.app"
+          cp "$RUNNER_TEMP/profile.mobileprovision" "$APP_DIR/embedded.mobileprovision"
+          rm -rf "$APP_DIR/_CodeSignature"
+
+          /usr/bin/codesign --force --sign "$IDENTITY" \
+            --entitlements "$RUNNER_TEMP/entitlements.plist" \
+            --timestamp=none \
+            --generate-entitlement-der \
+            "$APP_DIR"
+
+          /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_DIR"
+          /usr/bin/codesign -d --entitlements :- "$APP_DIR" || true
+
+          mkdir -p build/signed
+          (cd build && /usr/bin/zip -qry "signed/HongGuoFree-signed.ipa" Payload)
+          ls -lh build/signed
+
+      - name: Upload signed IPA
+        if: env.HAS_SIGNING == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: HongGuoFree-signed-ipa
+          path: build/signed/*.ipa
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: |
+            build/xcodebuild.log
+            build/DerivedData/Logs/**/*.xcactivitylog
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### 构建完成"
+            echo ""
+            echo "- Bundle ID: \`$BUNDLE_ID\`"
+            echo "- 未签名 IPA: \`HongGuoFree-unsigned.ipa\`（用 Sideloadly / AltStore / 爱思助手 自签安装）"
+            if [ "$HAS_SIGNING" = "true" ]; then
+              echo "- 已签名 IPA: \`HongGuoFree-signed.ipa\`（可直接安装）"
+            else
+              echo "- 已签名 IPA: 未生成（未配置 \`BUILD_CERTIFICATE_BASE64\` / \`PROVISIONING_PROFILE_BASE64\`）"
+            fi
+            echo ""
+            echo "在本次运行页面底部的 **Artifacts** 区域下载。"
+          } >> "$GITHUB_STEP_SUMMARY"
