@@ -41,6 +41,9 @@ const WEB_UA =
 
 const SEG_SIZE = 1024 * 1024; // 单次回传上限
 
+// 版本号：解密/头部处理逻辑有改动就 +1
+const SERVER_VERSION = "4";
+
 // ---------------------------------------------------------------- 工具
 
 const seen = (v, d = "") => String(v == null ? d : v).trim();
@@ -695,8 +698,16 @@ const server = http.createServer(async (req, res) => {
       sendJSON(res, 200, {
         ok: true,
         service: "hongguo-resolver",
+        // 版本号：改过解密逻辑就 +1，方便确认服务器跑的是哪版
+        version: SERVER_VERSION,
         time: new Date().toISOString(),
         auth: ACCESS_TOKEN ? "required" : "open",
+        features: {
+          // 这三项必须全为 true，否则就是旧代码
+          blankSenc: true,        // 清除 senc/saiz/saio（修黑屏的关键）
+          fullLengthNoRange: true, // 无 Range 时返回 200 + 完整长度
+          cencDecrypt: true,
+        },
         endpoints: ["/api/detail", "/api/episodes", "/api/play", "/api/stream", "/api/download"],
       });
       return;

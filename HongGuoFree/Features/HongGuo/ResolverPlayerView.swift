@@ -24,6 +24,7 @@ struct ResolverPlayerView: View {
     @State private var duration: Double = 0
     @State private var progress: Double = 0
     @State private var statusObservation: NSKeyValueObservation?
+    @State private var keepUpObservation: NSKeyValueObservation?
     @State private var debugLines: [String] = []
     @State private var showDebug = false
 
@@ -31,8 +32,10 @@ struct ResolverPlayerView: View {
         #if DEBUG
         print("[Resolver] \(s)")
         #endif
-        debugLines.append(s)
-        if debugLines.count > 12 { debugLines.removeFirst() }
+        let stamp = String(format: "%.1f", Date().timeIntervalSince1970
+            .truncatingRemainder(dividingBy: 1000))
+        debugLines.append("[\(stamp)] \(s)")
+        if debugLines.count > 14 { debugLines.removeFirst() }
     }
 
     private var client: HGServerClient {
@@ -136,6 +139,53 @@ struct ResolverPlayerView: View {
                     .progressViewStyle(.circular)
                     .tint(.white)
                     .scaleEffect(1.3)
+            }
+
+            // 常驻调试条：黑屏时点一下就能看到 AVPlayer 到底卡在哪
+            VStack {
+                Spacer()
+                HStack(spacing: 8) {
+                    Button {
+                        showDebug.toggle()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "ladybug.fill")
+                            Text(showDebug ? "收起诊断" : "诊断")
+                        }
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.5))
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+
+                if showDebug {
+                    VStack(alignment: .leading, spacing: 3) {
+                        if debugLines.isEmpty {
+                            Text("暂无日志（点「重试」生成）")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.5))
+                        }
+                        ForEach(Array(debugLines.enumerated()), id: \.offset) { _, line in
+                            Text(line)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.8))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.black.opacity(0.75))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 30)
+                }
             }
 
             if let errorText {
@@ -305,22 +355,42 @@ struct ResolverPlayerView: View {
             Task { @MainActor in
                 switch obj.status {
                 case .readyToPlay:
-                    debugLog("item readyToPlay, duration=\(obj.duration.seconds)")
-                    if obj.duration.seconds.isFinite, obj.duration.seconds > 0 {
-                        duration = obj.duration.seconds
-                    }
+                    let d = obj.duration.seconds
+                    debugLog("status=readyToPlay dur=\(d)")
+                    if d.isFinite, d > 0 { duration = d }
+                    let ranges = obj.loadedTimeRanges
+                        .compactMap { $0.timeRangeValue }
+                        .map { String(format: "%.0f-%.0f",
+                                      $0.start.seconds,
+                                      ($0.start + $0.duration).seconds) }
+                    debugLog("buffered: \(ranges.joined(separator: ","))")
                     if errorText?.hasPrefix("播放失败") == true { errorText = nil }
                 case .failed:
                     let msg = obj.error?.localizedDescription ?? "未知错误"
                     let ns = obj.error as NSError?
-                    let detail = "\(ns?.domain ?? "") \(ns?.code ?? 0)"
-                    debugLog("item failed: \(msg) [\(detail)]")
-                    errorText = "播放失败：\(msg)\n(\(detail))"
+                    debugLog("status=failed \(msg) [\(ns?.domain ?? "?") \(ns?.code ?? 0)]")
+                    // ATS 拦截的典型特征
+                    if let ns, ns.domain == NSURLErrorDomain, ns.code == -1022 {
+                        errorText = "被 App Transport Security 拦截（-1022）\n需要 NSAllowsArbitraryLoadsForMedia"
+                    } else {
+                        errorText = "播放失败：\(msg)\n(\(ns?.domain ?? "") \(ns?.code ?? 0))"
+                    }
                 case .unknown:
-                    debugLog("item unknown")
+                    debugLog("status=unknown（仍在加载）")
                 @unknown default:
                     break
                 }
+            }
+        }
+
+        // 也监听 playbackLikelyToKeepUp 和 bufferEmpty，黑屏时能看出卡在哪
+        keepUpObservation?.invalidate()
+        keepUpObservation = item.observe(\.isPlaybackLikelyToKeepUp,
+                                          options: [.new]) { obj, _ in
+            Task { @MainActor in
+                debugLog("keepUp=\(obj.isPlaybackLikelyToKeepUp) "
+                         + "bufferEmpty=\(obj.isPlaybackBufferEmpty) "
+                         + "bufferFull=\(obj.isPlaybackBufferFull)")
             }
         }
     }
@@ -356,6 +426,8 @@ struct ResolverPlayerView: View {
         timeObserver = nil
         statusObservation?.invalidate()
         statusObservation = nil
+        keepUpObservation?.invalidate()
+        keepUpObservation = nil
         NotificationCenter.default.removeObserver(self)
     }
 

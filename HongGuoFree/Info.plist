@@ -56,11 +56,23 @@
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
+		<!-- AVFoundation 加载 http 媒体流是单独检查的：
+		     只设 NSAllowsArbitraryLoads 不够，否则 AVPlayer 静默拒绝，
+		     表现为黑屏 + 时长 00:00，且 item.status 不进入 .failed。 -->
+		<key>NSAllowsArbitraryLoadsForMedia</key>
+		<true/>
 		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+		<!-- 局域网自建服务（192.168.x.x）需要这个，否则 iOS 14+ 会拦 -->
+		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>用于连接你在局域网内自建的内容源服务。</string>
+	<string>用于连接你在局域网内自建的内容源与解析服务。</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_http._tcp</string>
+	</array>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>用于把喜欢的短剧海报保存到相册。</string>
 </dict>
