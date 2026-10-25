@@ -23,6 +23,17 @@ struct ResolverPlayerView: View {
     @State private var timeObserver: Any?
     @State private var duration: Double = 0
     @State private var progress: Double = 0
+    @State private var statusObservation: NSKeyValueObservation?
+    @State private var debugLines: [String] = []
+    @State private var showDebug = false
+
+    private func debugLog(_ s: String) {
+        #if DEBUG
+        print("[Resolver] \(s)")
+        #endif
+        debugLines.append(s)
+        if debugLines.count > 12 { debugLines.removeFirst() }
+    }
 
     private var client: HGServerClient {
         HGServerClient(config: settings.resolverConfig)
@@ -32,6 +43,8 @@ struct ResolverPlayerView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
+            // 关键：player 未就绪时不要挂 VideoSurface，
+            // 否则 AVPlayerLayer 可能绑定到 nil 就再也不更新。
             if let player {
                 VideoSurface(player: player)
                     .ignoresSafeArea()
@@ -135,16 +148,48 @@ struct ResolverPlayerView: View {
                         .foregroundStyle(.white.opacity(0.9))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 32)
-                    Button("重试") {
-                        Task { await loadDetail() }
+
+                    HStack(spacing: 12) {
+                        Button("重试") {
+                            Task { await loadDetail() }
+                        }
+                        .font(.system(size: 13, weight: .semibold))
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 9)
+                        .background(Palette.accent)
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+                        .buttonStyle(.plain)
+
+                        Button(showDebug ? "隐藏详情" : "查看详情") {
+                            showDebug.toggle()
+                        }
+                        .font(.system(size: 13, weight: .semibold))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 9)
+                        .background(Color.white.opacity(0.15))
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+                        .buttonStyle(.plain)
                     }
-                    .font(.system(size: 13, weight: .semibold))
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 9)
-                    .background(Palette.accent)
-                    .foregroundStyle(.white)
-                    .clipShape(Capsule())
-                    .buttonStyle(.plain)
+
+                    if showDebug, !debugLines.isEmpty {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 3) {
+                                ForEach(Array(debugLines.enumerated()), id: \.offset) { _, line in
+                                    Text(line)
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(.white.opacity(0.65))
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                            .padding(10)
+                        }
+                        .frame(maxHeight: 160)
+                        .background(Color.white.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .padding(.horizontal, 24)
+                    }
                 }
             }
         }
@@ -225,20 +270,58 @@ struct ResolverPlayerView: View {
 
         do {
             let url = try client.streamURL(vid: ep.vid)
-            let item = AVPlayerItem(url: url)
+            debugLog("stream url = \(url.absoluteString)")
+
+            let asset = AVURLAsset(url: url, options: [
+                // 明确告诉 AVPlayer 这是普通的渐进式 MP4
+                "AVURLAssetHTTPHeaderFieldsKey": ["Accept": "*/*"],
+            ])
+            let item = AVPlayerItem(asset: asset)
             item.preferredForwardBufferDuration = 8
+            item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
+
+            // 监听失败原因，否则黑屏没有任何线索
+            observeItemStatus(item)
 
             let p = player ?? AVPlayer()
             p.replaceCurrentItem(with: item)
             p.automaticallyWaitsToMinimizeStalling = true
-            p.play()
             player = p
             current = ep
             duration = 0
             progress = 0
             installObservers(on: p, item: item)
+
+            p.play()
         } catch {
             errorText = error.localizedDescription
+        }
+    }
+
+    /// 监听 AVPlayerItem 状态与错误，把失败原因显示到界面上
+    private func observeItemStatus(_ item: AVPlayerItem) {
+        statusObservation?.cancel()
+        statusObservation = item.observe(\.status, options: [.initial, .new]) { obj, _ in
+            Task { @MainActor in
+                switch obj.status {
+                case .readyToPlay:
+                    debugLog("item readyToPlay, duration=\(obj.duration.seconds)")
+                    if obj.duration.seconds.isFinite, obj.duration.seconds > 0 {
+                        duration = obj.duration.seconds
+                    }
+                    if errorText?.hasPrefix("播放失败") == true { errorText = nil }
+                case .failed:
+                    let msg = obj.error?.localizedDescription ?? "未知错误"
+                    let ns = obj.error as NSError?
+                    let detail = "\(ns?.domain ?? "") \(ns?.code ?? 0)"
+                    debugLog("item failed: \(msg) [\(detail)]")
+                    errorText = "播放失败：\(msg)\n(\(detail))"
+                case .unknown:
+                    debugLog("item unknown")
+                @unknown default:
+                    break
+                }
+            }
         }
     }
 
@@ -271,6 +354,8 @@ struct ResolverPlayerView: View {
             p.removeTimeObserver(t)
         }
         timeObserver = nil
+        statusObservation?.cancel()
+        statusObservation = nil
         NotificationCenter.default.removeObserver(self)
     }
 

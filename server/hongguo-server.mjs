@@ -728,18 +728,55 @@ const server = http.createServer(async (req, res) => {
       if (!vid) return sendJSON(res, 400, { ok: false, error: "缺少 vid" });
       const s = await resolveStream(vid);
       const total = s.total;
+
+      // 没有 Range：必须回 200 + 完整 Content-Length，且不能带 Content-Range，
+      // 否则 AVPlayer 会误判文件大小。客户端会自己用 Range 再要片段。
       const range = parseRange(req.headers.range, total);
       if (range === "invalid") {
         send(res, 416, "range not satisfiable", { "Content-Range": `bytes */${total}` });
         return;
       }
-      const [start, rawEnd] = range || [0, Math.min(total, SEG_SIZE) - 1];
+
+      if (!range) {
+        // 无 Range：回 200，声明完整长度，分块发送（不缓冲整个文件）
+        res.writeHead(200, {
+          "Content-Type": "video/mp4",
+          "Content-Length": total,
+          "Accept-Ranges": "bytes",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "no-store",
+        });
+        try {
+          for (let pos = 0; pos < total; pos += SEG_SIZE) {
+            const segEnd = Math.min(pos + SEG_SIZE - 1, total - 1);
+            const remote = await remoteRange(s.url, pos, segEnd);
+            const plain = decryptPartial(
+              remote.data, pos,
+              s.encrypted ? s.key : null,
+              s.prepared || { header: Buffer.alloc(0), samples: [] }
+            );
+            if (!res.write(plain)) {
+              await new Promise((r) => res.once("drain", r));
+            }
+          }
+        } catch (e) {
+          console.error("[stream-200]", vid, e.message);
+        }
+        res.end();
+        return;
+      }
+
+      // 有 Range：回 206
+      const [start, rawEnd] = range;
       const end = Math.min(rawEnd, start + SEG_SIZE - 1, total - 1);
-
       const remote = await remoteRange(s.url, start, end);
-      const plain = decryptPartial(remote.data, start, s.encrypted ? s.key : null, s.prepared || { header: Buffer.alloc(0), samples: [] });
+      const plain = decryptPartial(
+        remote.data, start,
+        s.encrypted ? s.key : null,
+        s.prepared || { header: Buffer.alloc(0), samples: [] }
+      );
 
-      res.writeHead(range ? 206 : 200, {
+      res.writeHead(206, {
         "Content-Type": "video/mp4",
         "Content-Length": plain.length,
         "Accept-Ranges": "bytes",
