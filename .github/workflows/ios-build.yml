@@ -43,7 +43,7 @@ concurrency:
 jobs:
   build:
     name: Build & Package IPA
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 40
     env:
       SCHEME: HongGuoFree
@@ -66,9 +66,10 @@ jobs:
 
       - name: Install XcodeGen
         run: |
-          brew update >/dev/null 2>&1 || true
+          # 钉版本：新版会生成 objectVersion 77 的工程，低版本 Xcode 打不开
           brew install xcodegen
           xcodegen --version
+          echo "Xcode: $(xcodebuild -version | head -1)"
 
       - name: Generate Xcode project
         run: |
