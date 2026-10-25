@@ -300,7 +300,7 @@ struct ResolverPlayerView: View {
 
     /// 监听 AVPlayerItem 状态与错误，把失败原因显示到界面上
     private func observeItemStatus(_ item: AVPlayerItem) {
-        statusObservation?.cancel()
+        statusObservation?.invalidate()
         statusObservation = item.observe(\.status, options: [.initial, .new]) { obj, _ in
             Task { @MainActor in
                 switch obj.status {
@@ -354,7 +354,7 @@ struct ResolverPlayerView: View {
             p.removeTimeObserver(t)
         }
         timeObserver = nil
-        statusObservation?.cancel()
+        statusObservation?.invalidate()
         statusObservation = nil
         NotificationCenter.default.removeObserver(self)
     }
