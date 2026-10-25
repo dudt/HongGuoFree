@@ -6,12 +6,16 @@ struct HongGuoDetailView: View {
 
     @EnvironmentObject private var hongguo: HongGuoStore
     @EnvironmentObject private var store: AppStore
+    @EnvironmentObject private var settings: SettingsStore
 
     @State private var fullDrama: Drama?
     @State private var isLoading = false
     @State private var loadError: String?
     @State private var playerEpisode: Episode?
     @State private var selectedRange = 0
+    /// 用自建解析服务播放（全集 1080P）
+    @State private var showResolverPlayer = false
+    @State private var resolverStartIndex = 1
 
     private var current: Drama { fullDrama ?? drama }
 
@@ -85,6 +89,14 @@ struct HongGuoDetailView: View {
                                title: "无法打开播放页",
                                message: "这一集缺少播放标识，换一集试试。")
             }
+        }
+        .fullScreenCover(isPresented: $showResolverPlayer) {
+            ResolverPlayerView(
+                seriesID: current.id,
+                seriesTitle: current.title,
+                startIndex: resolverStartIndex
+            )
+            .environmentObject(settings)
         }
     }
 
@@ -169,6 +181,31 @@ struct HongGuoDetailView: View {
                         .fill(Palette.accent))
                 }
                 .buttonStyle(PressableStyle())
+            }
+
+            // 解析服务入口：全集 1080P
+            if settings.hasResolver {
+                Button {
+                    resolverStartIndex = 1
+                    showResolverPlayer = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "bolt.horizontal.circle.fill")
+                        Text("全集播放（1080P · 解析服务）")
+                    }
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Palette.textPrimary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+                    .background(RoundedRectangle(cornerRadius: Radius.chip, style: .continuous)
+                        .fill(Palette.surface.opacity(0.6)))
+                }
+                .buttonStyle(PressableStyle())
+            } else {
+                Text("在「我的 → 解析服务」填好服务地址后，这里会多一个「全集播放」按钮。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(14)

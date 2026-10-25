@@ -13,6 +13,36 @@ struct SettingsView: View {
     @State private var showAbout = false
     @State private var copiedHint = false
 
+    // 解析服务
+    @State private var draftResolverURL = ""
+    @State private var draftResolverToken = ""
+    @State private var resolverStatus: ResolverStatus = .unknown
+
+    enum ResolverStatus: Equatable {
+        case unknown
+        case checking
+        case ok
+        case failed(String)
+
+        var text: String {
+            switch self {
+            case .unknown: return "未检测"
+            case .checking: return "检测中…"
+            case .ok: return "连接正常"
+            case .failed(let m): return "失败：\(m)"
+            }
+        }
+
+        var color: Color {
+            switch self {
+            case .unknown: return Palette.textSecondary
+            case .checking: return Palette.textSecondary
+            case .ok: return .green
+            case .failed: return .red
+            }
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -21,6 +51,7 @@ struct SettingsView: View {
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 18) {
                         profileCard
+                        resolverSection
                         sourceSection
                         playbackSection
                         aboutSection
@@ -48,6 +79,105 @@ struct SettingsView: View {
     }
 
     // MARK: - 区块
+
+    // MARK: 解析服务
+
+    private var resolverSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "解析服务",
+                          subtitle: "填自建服务地址，红果专区可看全集 1080P")
+
+            VStack(alignment: .leading, spacing: 10) {
+                TextField("http://192.168.1.10:8787", text: $draftResolverURL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                    .font(.system(size: 13, design: .monospaced))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Palette.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                SecureField("访问口令（可选，服务端设了 ACCESS_TOKEN 才需要）",
+                            text: $draftResolverToken)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.system(size: 13, design: .monospaced))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Palette.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                HStack(spacing: 10) {
+                    Button {
+                        saveResolver()
+                    } label: {
+                        Text("保存")
+                            .font(.system(size: 13, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .background(Palette.accent)
+                            .foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 9))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        Task { await checkResolver() }
+                    } label: {
+                        Text("测试连接")
+                            .font(.system(size: 13, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .background(Palette.surface)
+                            .foregroundStyle(Palette.textPrimary)
+                            .clipShape(RoundedRectangle(cornerRadius: 9))
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                HStack(spacing: 6) {
+                    Circle().fill(resolverStatus.color).frame(width: 6, height: 6)
+                    Text(resolverStatus.text)
+                        .font(.system(size: 11))
+                        .foregroundStyle(resolverStatus.color)
+                    Spacer()
+                }
+
+                Text("部署：node server/hongguo-server.mjs（默认 :8787）。同一局域网填内网 IP；公网建议套 HTTPS 并设 ACCESS_TOKEN。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .background(Palette.surface.opacity(0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .onAppear {
+            draftResolverURL = settings.resolverBaseURL
+            draftResolverToken = settings.resolverToken
+        }
+    }
+
+    private func saveResolver() {
+        settings.resolverBaseURL = draftResolverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        settings.resolverToken = draftResolverToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task { await checkResolver() }
+    }
+
+    private func checkResolver() async {
+        let cfg = ResolverConfig(baseURL: draftResolverURL, token: draftResolverToken)
+        guard cfg.isConfigured else {
+            await MainActor.run { resolverStatus = .failed("地址为空") }
+            return
+        }
+        await MainActor.run { resolverStatus = .checking }
+        let client = HGServerClient(config: cfg)
+        let ok = await client.health()
+        await MainActor.run {
+            resolverStatus = ok ? .ok : .failed("服务未响应")
+        }
+    }
 
     private var profileCard: some View {
         HStack(spacing: 12) {

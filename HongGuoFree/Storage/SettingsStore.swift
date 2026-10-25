@@ -13,6 +13,8 @@ final class SettingsStore: ObservableObject {
         static let rememberProgress = "app.rememberProgress"
         static let playbackRate = "app.playbackRate"
         static let preferQuality = "app.preferQuality"
+        static let resolverBaseURL = "app.resolverBaseURL"
+        static let resolverToken = "app.resolverToken"
     }
 
     private let defaults = UserDefaults.standard
@@ -25,13 +27,28 @@ final class SettingsStore: ObservableObject {
     @Published var playbackRate: Double
     @Published var preferQuality: String
 
+    /// 自建解析服务地址（server/hongguo-server.mjs）
+    @Published var resolverBaseURL: String
+    /// 服务端 ACCESS_TOKEN（可选）
+    @Published var resolverToken: String
+
+    /// 组装好的解析服务配置
+    var resolverConfig: ResolverConfig {
+        ResolverConfig(baseURL: resolverBaseURL, token: resolverToken)
+    }
+
+    /// 是否已配置解析服务
+    var hasResolver: Bool { resolverConfig.isConfigured }
+
     init() {
         defaults.register(defaults: [
             Key.autoplayNext: true,
             Key.loopEpisode: false,
             Key.rememberProgress: true,
             Key.playbackRate: 1.0,
-            Key.preferQuality: "自动"
+            Key.preferQuality: "自动",
+            Key.resolverBaseURL: "",
+            Key.resolverToken: ""
         ])
 
         let storedRate = defaults.double(forKey: Key.playbackRate)
@@ -41,6 +58,8 @@ final class SettingsStore: ObservableObject {
         rememberProgress = defaults.bool(forKey: Key.rememberProgress)
         playbackRate = storedRate == 0 ? 1.0 : storedRate
         preferQuality = defaults.string(forKey: Key.preferQuality) ?? "自动"
+        resolverBaseURL = defaults.string(forKey: Key.resolverBaseURL) ?? ""
+        resolverToken = defaults.string(forKey: Key.resolverToken) ?? ""
 
         bindPersistence()
     }
@@ -64,6 +83,12 @@ final class SettingsStore: ObservableObject {
             .store(in: &bag)
         $preferQuality
             .sink { [weak self] in self?.defaults.set($0, forKey: Key.preferQuality) }
+            .store(in: &bag)
+        $resolverBaseURL
+            .sink { [weak self] in self?.defaults.set($0, forKey: Key.resolverBaseURL) }
+            .store(in: &bag)
+        $resolverToken
+            .sink { [weak self] in self?.defaults.set($0, forKey: Key.resolverToken) }
             .store(in: &bag)
     }
 

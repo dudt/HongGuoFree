@@ -70,3 +70,6 @@ tools/hongguo_crawl.py
 tools/probe_api.py
 tools/probe_series.py
 package.json
+
+# 但 server/ 是本项目代码，要保留
+!server/
