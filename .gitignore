@@ -25,3 +25,6 @@ DerivedData/
 __pycache__/
 *.pyc
 .venv/
+
+# 临时探测文件
+.tmp/
