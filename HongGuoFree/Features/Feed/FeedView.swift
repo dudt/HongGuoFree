@@ -96,7 +96,7 @@ struct FeedView: View {
                     await feed.reload(config: settings.resolverConfig)
                 }
             }
-            .onChange(of: settings.resolverBaseURL) { _, _ in
+            .onChange(of: settings.resolverBaseURL) { _ in
                 Task { await feed.reload(config: settings.resolverConfig) }
             }
             .fullScreenCover(item: $playerSeries) { item in
