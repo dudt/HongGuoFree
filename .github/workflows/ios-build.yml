@@ -24,6 +24,14 @@ on:
           - ad-hoc
           - enterprise
           - app-store
+      marketing_version:
+        description: '版本号（留空用 project.yml 的 1.0.0）'
+        required: false
+        default: ''
+      build_number:
+        description: '构建号（留空用 run number）'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -42,6 +50,8 @@ jobs:
       PROJECT: HongGuoFree.xcodeproj
       BUNDLE_ID: ${{ inputs.bundle_id || 'com.hongguofree.app' }}
       EXPORT_METHOD: ${{ inputs.export_method || 'development' }}
+      MARKETING_VERSION: ${{ inputs.marketing_version || '1.0.0' }}
+      BUILD_NUMBER: ${{ inputs.build_number || github.run_number }}
       HAS_SIGNING: ${{ secrets.BUILD_CERTIFICATE_BASE64 != '' && secrets.PROVISIONING_PROFILE_BASE64 != '' }}
 
     steps:
@@ -81,6 +91,8 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS="" \
             PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            MARKETING_VERSION="$MARKETING_VERSION" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             build 2>&1 | tee build/xcodebuild.log
 
       - name: Verify .app
@@ -105,7 +117,9 @@ jobs:
           cp -R "$APP_PATH" build/Payload/
           # 未签名包需要清掉签名残留，否则部分安装器会报错
           rm -rf "build/Payload/$SCHEME.app/_CodeSignature" || true
-          (cd build && /usr/bin/zip -qry "unsigned/HongGuoFree-unsigned.ipa" Payload)
+          IPA_NAME="HongGuoFree-${MARKETING_VERSION}-${BUILD_NUMBER}-unsigned.ipa"
+          (cd build && /usr/bin/zip -qry "unsigned/$IPA_NAME" Payload)
+          echo "IPA_NAME=$IPA_NAME" >> "$GITHUB_ENV"
           ls -lh build/unsigned
 
       - name: Upload unsigned IPA
@@ -210,7 +224,8 @@ jobs:
             echo "### 构建完成"
             echo ""
             echo "- Bundle ID: \`$BUNDLE_ID\`"
-            echo "- 未签名 IPA: \`HongGuoFree-unsigned.ipa\`（用 Sideloadly / AltStore / 爱思助手 自签安装）"
+            echo "- 版本: \`$MARKETING_VERSION ($BUILD_NUMBER)\`"
+            echo "- 未签名 IPA: \`$IPA_NAME\`（用 Sideloadly / AltStore / 爱思助手 自签安装）"
             if [ "$HAS_SIGNING" = "true" ]; then
               echo "- 已签名 IPA: \`HongGuoFree-signed.ipa\`（可直接安装）"
             else

@@ -28,3 +28,45 @@ __pycache__/
 
 # 临时探测文件
 .tmp/
+
+# ---------- 逆向分析产物（体积大，不进仓库）----------
+# 分析工作区：解包的 APK/IPA、dex、so、下载的视频
+.work/
+
+# 原始样本（自行准备）
+*.apk
+*.ipa
+*.dmg
+*.app/
+
+# 第三方工具（自行下载）
+tools/jadx/
+
+# Node 依赖
+node_modules/
+package-lock.json
+
+# 运行时日志
+*.log
+!docs/**/*.log
+
+# ---------- 第三方 / 分析资料（不属于本 App 源码）----------
+# 作者 hongguoTV 的 GPL-3.0 工程（独立分发，不并入本仓库）
+hongguoTV-main/
+
+# 逆向分析报告（含接口细节，单独归档）
+REVERSE-REPORT.md
+
+# 依赖 hongguoTV-main/server/vendor 的脚本（第三方不在本仓库）
+tools/hongguo_batch.mjs
+tools/hongguo_download.mjs
+tools/hongguo_resolve.mjs
+tools/hongguo_stream.mjs
+tools/hongguo_debug.mjs
+tools/hongguo_matrix.mjs
+tools/hongguo_api.py
+tools/hongguo_collect.py
+tools/hongguo_crawl.py
+tools/probe_api.py
+tools/probe_series.py
+package.json
