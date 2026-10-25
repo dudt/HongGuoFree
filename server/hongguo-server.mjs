@@ -569,51 +569,78 @@ function qualityRows(videoList) {
 }
 
 /** 解析一集：拿到明文 URL + 内容密钥 + 样本表 */
+/**
+ * 并发去重：同一 vid 的多个并发请求共用一次解析。
+ * AVPlayer 会同时发 HEAD + 多个 Range，没有这个会重复解析 3~4 遍。
+ */
+const inflight = new Map();
+
 async function resolveStream(vid) {
   const cached = streamCache.get(vid);
   if (cached && Date.now() - cached.time < CACHE_TTL) return cached.value;
 
-  const { info } = await fetchVideoInfo(vid);
-  const rows = qualityRows(info.video_list);
-  if (!rows.length) throw new Error("没有可用清晰度");
-  const selected = rows[0];
+  const running = inflight.get(vid);
+  if (running) return running;
 
-  let url = seen(selected.item.main_url).replace(/\\\//g, "/").replace(/\\u0026/g, "&").replace(/&amp;/g, "&");
-  const seed = Buffer.from(seen(info.key_seed), "base64");
-  if (seed.length && url) url = decryptSpadeUrl(url, seed);
-  const key = selected.item.spade_a ? deriveContentKey(selected.item.spade_a) : null;
+  const p = (async () => {
+    const { info } = await fetchVideoInfo(vid);
+    const rows = qualityRows(info.video_list);
+    if (!rows.length) throw new Error("没有可用清晰度");
+    const selected = rows[0];
 
-  // 拉头部建 CENC 索引
-  const first = await remoteRange(url, 0, 256 * 1024 - 1);
-  const head = first.data;
-  const total = first.total || head.length;
-  const moov = readBox(head, head.readUInt32BE(0));
-  let prepared = null;
-  let encrypted = false;
-  if (moov && moov.type === "moov") {
-    const moovEnd = moov.offset + moov.size;
-    let headerBuf = head;
-    if (moovEnd > head.length) {
-      const rest = await remoteRange(url, head.length, moovEnd - 1);
-      headerBuf = Buffer.concat([head.subarray(0, head.length), rest.data]);
+    let url = seen(selected.item.main_url).replace(/\\\//g, "/").replace(/\\u0026/g, "&").replace(/&amp;/g, "&");
+    const seed = Buffer.from(seen(info.key_seed), "base64");
+    if (seed.length && url) url = decryptSpadeUrl(url, seed);
+    const key = selected.item.spade_a ? deriveContentKey(selected.item.spade_a) : null;
+
+    // 拉头部建 CENC 索引
+    const first = await remoteRange(url, 0, 256 * 1024 - 1);
+    const head = first.data;
+    const total = first.total || head.length;
+    const moov = readBox(head, head.readUInt32BE(0));
+    let prepared = null;
+    let encrypted = false;
+    if (moov && moov.type === "moov") {
+      const moovEnd = moov.offset + moov.size;
+      let headerBuf = head;
+      if (moovEnd > head.length) {
+        const rest = await remoteRange(url, head.length, moovEnd - 1);
+        headerBuf = Buffer.concat([head.subarray(0, head.length), rest.data]);
+      }
+      headerBuf = headerBuf.subarray(0, moovEnd);
+      encrypted = headerBuf.indexOf(Buffer.from("encv")) >= 0 || headerBuf.indexOf(Buffer.from("enca")) >= 0;
+      prepared = prepareCencHeader(headerBuf, encrypted ? key : null);
     }
-    headerBuf = headerBuf.subarray(0, moovEnd);
-    encrypted = headerBuf.indexOf(Buffer.from("encv")) >= 0 || headerBuf.indexOf(Buffer.from("enca")) >= 0;
-    prepared = prepareCencHeader(headerBuf, encrypted ? key : null);
-  }
 
-  const value = {
-    vid: String(vid),
-    url,
-    key,
-    quality: qualityLabel(selected.quality || selected.key),
-    total,
-    encrypted,
-    prepared,
-    duration: Number(info.video_duration || 0),
-  };
-  streamCache.set(vid, { time: Date.now(), value });
-  return value;
+    const value = {
+      vid: String(vid),
+      url,
+      key,
+      quality: qualityLabel(selected.quality || selected.key),
+      total,
+      encrypted,
+      prepared,
+      duration: Number(info.video_duration || 0),
+    };
+    streamCache.set(vid, { time: Date.now(), value });
+    return value;
+  })();
+
+  inflight.set(vid, p);
+  try {
+    return await p;
+  } finally {
+    inflight.delete(vid);
+  }
+}
+
+/** 预热：提前把解析结果放进缓存（失败忽略） */
+async function warmStream(vid) {
+  try {
+    await resolveStream(vid);
+  } catch {
+    /* 忽略 */
+  }
 }
 
 // ---------------------------------------------------------------- 网页端（拿全集清单）
@@ -683,6 +710,23 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   const path = url.pathname.replace(/\/+$/, "") || "/";
 
+  // 请求日志：确认 AVPlayer 到底有没有打过来、发了什么
+  const t0 = Date.now();
+  const clientIp = (req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").toString();
+  console.log(
+    `[req] ${new Date().toISOString().slice(11, 23)} ${req.method} ${path}` +
+    `${url.search ? url.search.slice(0, 80) : ""} ` +
+    `range=${req.headers.range || "-"} ua=${(req.headers["user-agent"] || "-").slice(0, 30)} from=${clientIp}`
+  );
+  res.on("finish", () => {
+    console.log(`[res] ${req.method} ${path} -> ${res.statusCode} (${Date.now() - t0}ms)`);
+  });
+  res.on("close", () => {
+    if (!res.writableFinished) {
+      console.log(`[res] ${req.method} ${path} -> ABORTED after ${Date.now() - t0}ms`);
+    }
+  });
+
   try {
     if (req.method === "OPTIONS") {
       res.writeHead(204, {
@@ -723,6 +767,9 @@ const server = http.createServer(async (req, res) => {
       const sid = seen(url.searchParams.get("series_id"));
       if (!sid) return sendJSON(res, 400, { ok: false, error: "缺少 series_id" });
       const info = await seriesVids(sid);
+      // 预热第一集：iOS 端拿完 detail 就会播第 1 集，
+      // 提前解析好，避免 AVPlayer 等待超时（黑屏 + 00:00）。
+      if (info.vids.length) warmStream(info.vids[0]).catch(() => {});
       sendJSON(res, 200, {
         ok: true,
         series_id: info.seriesId,
@@ -755,6 +802,9 @@ const server = http.createServer(async (req, res) => {
       const vid = seen(url.searchParams.get("vid"));
       if (!vid) return sendJSON(res, 400, { ok: false, error: "缺少 vid" });
       const s = await resolveStream(vid);
+      // 预热：客户端拿到 play 信息后紧接着就会请求 /api/stream，
+      // 这里把缓存打好，避免 AVPlayer 等 2 秒解析超时。
+      warmStream(vid).catch(() => {});
       sendJSON(res, 200, {
         ok: true,
         vid: s.vid,
@@ -776,6 +826,21 @@ const server = http.createServer(async (req, res) => {
       if (!vid) return sendJSON(res, 400, { ok: false, error: "缺少 vid" });
       const s = await resolveStream(vid);
       const total = s.total;
+
+      // HEAD：只回头，绝不能走下面的解密流程。
+      // 之前 HEAD 命中了「无 Range → 分块发整集」分支，
+      // 要下载并解密整个文件才返回，AVPlayer 等不及就放弃了（黑屏 + 00:00）。
+      if (req.method === "HEAD") {
+        res.writeHead(200, {
+          "Content-Type": "video/mp4",
+          "Content-Length": total,
+          "Accept-Ranges": "bytes",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "no-store",
+        });
+        res.end();
+        return;
+      }
 
       // 没有 Range：必须回 200 + 完整 Content-Length，且不能带 Content-Range，
       // 否则 AVPlayer 会误判文件大小。客户端会自己用 Range 再要片段。
@@ -824,6 +889,8 @@ const server = http.createServer(async (req, res) => {
         s.prepared || { header: Buffer.alloc(0), samples: [] }
       );
 
+      // 客户端要「到文件末尾」且请求量不大时，直接给完整剩余部分，
+      // 少一轮往返；否则按 SEG_SIZE 分片。
       res.writeHead(206, {
         "Content-Type": "video/mp4",
         "Content-Length": plain.length,
