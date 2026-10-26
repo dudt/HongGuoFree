@@ -121,7 +121,7 @@ final class DanmakuEngine: ObservableObject {
     func laneCount(for height: CGFloat) -> Int {
         let usable = Double(height) * settings.areaRatio - settings.topInset
         let laneHeight = settings.fontSize * 1.9
-        return max(1, min(12, Int(usable / laneHeight)))
+        return max(1, min(14, Int(usable / laneHeight)))
     }
 
     func load(_ items: [HGDmakuItem]) {
