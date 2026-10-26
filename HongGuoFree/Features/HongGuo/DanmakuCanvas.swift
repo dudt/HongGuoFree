@@ -1,111 +1,36 @@
-// 原生播放器（AVPlayerViewController）
+// 弹幕画布
 //
-// 为什么用系统播放器：
-//   自己拼手势层容易互相抢触摸（上一版 LongPressBridge 覆盖在最上层，
-//   把 tap/drag 全拦掉了）。AVPlayerViewController 是苹果官方组件，
-//   自带完整的控制层、手势、AirPlay、画中画、字幕、倍速，
-//   稳定性和体验都是系统级的。
-//
-// 弹幕怎么叠：
-//   AVPlayerViewController.contentOverlayView 位于「视频之上、控制层之下」，
-//   把弹幕 layer 加进去即可 —— 控制层出现时自动盖住弹幕，符合原生行为。
-//   弹幕 view 设 isUserInteractionEnabled = false，不干扰系统手势。
-//
-// 弹幕时间同步：
-//   弹幕层自己监听 AVPlayer 的 periodicTimeObserver，
-//   不依赖 SwiftUI 状态刷新，性能最好。
+// 直接绑定 AVPlayer，自己监听时间，不经过 SwiftUI 状态刷新。
+// 每条弹幕 = 一个 CALayer + 一条 CABasicAnimation，
+// 动画提交后由 Core Animation 渲染进程插值，主线程零参与。
 import SwiftUI
-import AVKit
 import AVFoundation
 
-// MARK: - SwiftUI 包装
-
-struct NativePlayerView: UIViewControllerRepresentable {
+struct DanmakuCanvas: UIViewRepresentable {
+    @ObservedObject var engine: DanmakuEngine
     let player: AVPlayer
-    /// 弹幕轨道（装载后不变）
-    let danmakuItems: [ScheduledDanmaku]
-    let danmakuSettings: DanmakuSettings
-    /// 是否显示系统控制层
-    var showsControls: Bool = true
 
-    func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let vc = AVPlayerViewController()
-        vc.player = player
-        vc.showsPlaybackControls = showsControls
-        vc.videoGravity = .resizeAspect
-        vc.allowsPictureInPicturePlayback = true
-        vc.canStartPictureInPictureAutomaticallyFromInline = false
-        vc.entersFullScreenWhenPlaybackBegins = false
-        vc.exitsFullScreenWhenPlaybackEnds = false
-        vc.updatesNowPlayingInfoCenter = true
-
-        // 弹幕层挂到 contentOverlayView
-        let dm = DanmakuPlayerOverlay()
-        dm.isUserInteractionEnabled = false
-        dm.translatesAutoresizingMaskIntoConstraints = false
-        if let host = vc.contentOverlayView {
-            host.addSubview(dm)
-            NSLayoutConstraint.activate([
-                dm.leadingAnchor.constraint(equalTo: host.leadingAnchor),
-                dm.trailingAnchor.constraint(equalTo: host.trailingAnchor),
-                dm.topAnchor.constraint(equalTo: host.topAnchor),
-                dm.bottomAnchor.constraint(equalTo: host.bottomAnchor),
-            ])
-        }
-        context.coordinator.overlay = dm
-        context.coordinator.attach(to: player)
-        dm.apply(items: danmakuItems, settings: danmakuSettings)
-        return vc
+    func makeUIView(context: Context) -> DanmakuCanvasView {
+        let v = DanmakuCanvasView()
+        v.isUserInteractionEnabled = false
+        v.attach(player: player)
+        v.apply(items: engine.scheduled, settings: engine.settings)
+        return v
     }
 
-    func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {
-        if vc.player !== player { vc.player = player }
-        if vc.showsPlaybackControls != showsControls {
-            vc.showsPlaybackControls = showsControls
-        }
-        context.coordinator.overlay?.apply(items: danmakuItems,
-                                           settings: danmakuSettings)
+    func updateUIView(_ v: DanmakuCanvasView, context: Context) {
+        v.attach(player: player)
+        v.apply(items: engine.scheduled, settings: engine.settings)
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    static func dismantleUIViewController(_ vc: AVPlayerViewController,
-                                          coordinator: Coordinator) {
-        coordinator.detach()
-        coordinator.overlay?.removeFromSuperview()
-    }
-
-    final class Coordinator {
-        weak var overlay: DanmakuPlayerOverlay?
-        private var timeObserver: Any?
-        private weak var player: AVPlayer?
-
-        func attach(to player: AVPlayer) {
-            detach()
-            self.player = player
-            // 弹幕自己跟时间，不经过 SwiftUI
-            timeObserver = player.addPeriodicTimeObserver(
-                forInterval: CMTime(seconds: 0.2, preferredTimescale: 600),
-                queue: .main
-            ) { [weak self] t in
-                let secs = t.seconds
-                guard secs.isFinite else { return }
-                self?.overlay?.tick(time: secs)
-            }
-        }
-
-        func detach() {
-            if let o = timeObserver, let p = player {
-                p.removeTimeObserver(o)
-            }
-            timeObserver = nil
-        }
+    static func dismantleUIView(_ v: DanmakuCanvasView, coordinator: ()) {
+        v.detach()
     }
 }
 
-// MARK: - 弹幕叠加层（纯 UIKit，零 SwiftUI 刷新）
+// MARK: - 实现
 
-final class DanmakuPlayerOverlay: UIView {
+final class DanmakuCanvasView: UIView {
 
     private var settings = DanmakuSettings()
     private var items: [ScheduledDanmaku] = []
@@ -114,13 +39,17 @@ final class DanmakuPlayerOverlay: UIView {
     private var currentTime: Double = 0
     private var lastScheduledBase: Double = -1
     private let lookahead = 3.0
+
     private let container = CALayer()
+    private var ticker: Timer?
+    private weak var player: AVPlayer?
+    private var timeObserver: Any?
+
     private let imageCache: NSCache<NSString, CGImage> = {
         let c = NSCache<NSString, CGImage>()
         c.countLimit = 800
         return c
     }()
-    private var ticker: Timer?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -141,6 +70,7 @@ final class DanmakuPlayerOverlay: UIView {
     }
 
     deinit {
+        detach()
         ticker?.invalidate()
     }
 
@@ -152,7 +82,37 @@ final class DanmakuPlayerOverlay: UIView {
         CATransaction.commit()
     }
 
-    // MARK: 对外
+    // MARK: 绑定播放器
+
+    func attach(player: AVPlayer) {
+        guard self.player !== player else { return }
+        detach()
+        self.player = player
+        timeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.2, preferredTimescale: 600),
+            queue: .main
+        ) { [weak self] t in
+            guard let self else { return }
+            let s = t.seconds
+            guard s.isFinite else { return }
+            self.currentTime = s
+            if abs(s - self.lastScheduledBase) > 1.5 {
+                // 大跨度跳转 → 重建
+                self.clearLive()
+                self.nextIndex = self.indexFor(time: s)
+                self.schedule()
+            }
+        }
+    }
+
+    func detach() {
+        if let o = timeObserver, let p = player {
+            p.removeTimeObserver(o)
+        }
+        timeObserver = nil
+    }
+
+    // MARK: 数据
 
     func apply(items new: [ScheduledDanmaku], settings s: DanmakuSettings) {
         let itemsChanged = new.count != items.count || new.first?.id != items.first?.id
@@ -167,16 +127,6 @@ final class DanmakuPlayerOverlay: UIView {
         schedule()
     }
 
-    func tick(time: Double) {
-        currentTime = time
-        // 大跨度跳转（拖动进度）→ 重建
-        if abs(time - lastScheduledBase) > 1.5 {
-            clearLive()
-            nextIndex = indexFor(time: time)
-            schedule()
-        }
-    }
-
     // MARK: 调度
 
     private func indexFor(time t: Double) -> Int {
@@ -189,7 +139,7 @@ final class DanmakuPlayerOverlay: UIView {
     }
 
     private func schedule() {
-        guard !items.isEmpty, bounds.width > 1 else { return }
+        guard settings.enabled, !items.isEmpty, bounds.width > 1 else { return }
         let now = currentTime
         lastScheduledBase = now
         let until = now + lookahead

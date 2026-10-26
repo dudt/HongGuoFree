@@ -1,10 +1,22 @@
-// 播放页
+// 播放器（自定义 UI，单一手势层）
 //
-// 播放本身交给系统 AVPlayerViewController（自带控制层/手势/AirPlay/画中画），
-// 外层只负责：拉数据、选集、清晰度、弹幕设置、进度保存、自动连播。
+// 上一版点击失效的根因：多个手势识别器叠在一起互相抢占
+//   （onTapGesture + onLongPressGesture + DragGesture + UIKit 桥接）。
+//
+// 本版原则：整个播放区只有一个 DragGesture(minimumDistance: 0)。
+// 所有交互都由它在 onChanged/onEnded 里按「位移 + 时长」判定：
+//   位移 < 8pt 且时长 < 0.25s   → 单击（切换控制层）
+//   位移 < 8pt 且时长 < 0.28s 的第二次 → 双击（左退/右进 10s）
+//   位移 < 12pt 且时长 ≥ 0.3s   → 长按（2 倍速，松手恢复）
+//   横向位移 > 14pt             → 拖动进度
+//   纵向位移 > 14pt             → 左侧亮度 / 右侧音量
+// 因为只有一个识别器，不存在抢占。
 import SwiftUI
 import AVKit
 import AVFoundation
+import MediaPlayer
+
+// MARK: - 清晰度
 
 struct HGVariant: Identifiable, Hashable {
     var vid: String
@@ -12,6 +24,8 @@ struct HGVariant: Identifiable, Hashable {
     var url: URL
     var id: String { vid + label }
 }
+
+// MARK: - 播放器
 
 struct ResolverPlayerView: View {
     let seriesID: String
@@ -35,21 +49,51 @@ struct ResolverPlayerView: View {
     @State private var isPlaying = false
     @State private var progress: Double = 0
     @State private var duration: Double = 0
+    @State private var bufferedEnd: Double = 0
+    @State private var rate: Float = 1.0
     @State private var lastSavedSecond = -1
 
     // 弹幕
     @StateObject private var danmaku = DanmakuEngine()
 
     // UI
+    @State private var controlsVisible = true
+    @State private var hideTask: Task<Void, Never>?
     @State private var showEpisodes = false
     @State private var showQuality = false
     @State private var showDanmakuSettings = false
-    @State private var controlsVisible = true
-    @State private var hideTask: Task<Void, Never>?
 
-    // 观察
+    // 手势状态（全部由单一 DragGesture 驱动）
+    @State private var touchStart: Date = .distantPast
+    @State private var touchStartPoint: CGPoint = .zero
+    @State private var lastTapTime: Date = .distantPast
+    @State private var lastTapX: CGFloat = 0
+    @State private var mode: TouchMode = .undecided
+    @State private var dragStartProgress: Double = 0
+    @State private var scrubTarget: Double = 0
+    @State private var brightnessBase: CGFloat = 0.5
+    @State private var volumeBase: CGFloat = 0.5
+    @State private var longPressFired = false
+    @State private var rateBeforeBoost: Float = 1.0
+
+    // HUD
+    @State private var hudText: String?
+    @State private var hudIcon: String?
+    @State private var hudTask: Task<Void, Never>?
+
+    private enum TouchMode {
+        case undecided
+        case seeking        // 横向拖动
+        case brightness     // 纵向左侧
+        case volume         // 纵向右侧
+        case longPressing   // 长按中
+        case ignored        // 已判定为无效（比如拖动后）
+    }
+
+    // 观察器
     @State private var timeObserver: Any?
     @State private var statusObs: NSKeyValueObservation?
+    @State private var bufferObs: NSKeyValueObservation?
     @State private var endObserver: NSObjectProtocol?
 
     private var client: HGServerClient { HGServerClient(config: settings.resolverConfig) }
@@ -58,23 +102,25 @@ struct ResolverPlayerView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            NativePlayerView(
-                player: player,
-                danmakuItems: danmaku.scheduled,
-                danmakuSettings: danmaku.settings,
-                showsControls: true
-            )
-            .ignoresSafeArea()
+            // 视频 + 弹幕
+            PlayerSurface(player: player).ignoresSafeArea()
+            DanmakuCanvas(engine: danmaku, player: player)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
 
-            // 自定义顶部/底部（系统控制层之外的补充入口）
+            // 唯一手势层
+            touchLayer
+
+            // 控制层（自身可点，不吃手势层的触摸）
             if controlsVisible {
-                VStack {
-                    topBar
-                    Spacer()
-                    bottomBar
-                }
-                .transition(.opacity)
-                .allowsHitTesting(true)
+                controlsLayer
+                    .transition(.opacity)
+            }
+
+            // HUD
+            if let hudText {
+                hudView(hudText)
+                    .allowsHitTesting(false)
             }
 
             if loading {
@@ -87,6 +133,7 @@ struct ResolverPlayerView: View {
             }
         }
         .statusBarHidden(true)
+        .persistentSystemOverlays(.hidden)
         .task { await loadDetail() }
         .sheet(isPresented: $showEpisodes) { episodeSheet }
         .sheet(isPresented: $showQuality) { qualitySheet }
@@ -94,7 +141,188 @@ struct ResolverPlayerView: View {
         .onDisappear { teardown() }
     }
 
-    // MARK: 顶部
+    // MARK: - 单一手势层
+
+    private var touchLayer: some View {
+        GeometryReader { geo in
+            Color.clear
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                        .onChanged { v in onTouchChanged(v, in: geo.size) }
+                        .onEnded { v in onTouchEnded(v, in: geo.size) }
+                )
+        }
+    }
+
+    private func onTouchChanged(_ v: DragGesture.Value, in size: CGSize) {
+        if mode == .undecided {
+            let dx = v.translation.width
+            let dy = v.translation.height
+            let dist = max(abs(dx), abs(dy))
+
+            if dist > 14 {
+                // 判定方向
+                if abs(dx) > abs(dy) {
+                    mode = .seeking
+                    dragStartProgress = progress
+                    scrubTarget = progress
+                    showHud(fmt(progress), icon: "arrow.left.and.right")
+                } else {
+                    if v.startLocation.x < size.width / 2 {
+                        mode = .brightness
+                        brightnessBase = UIScreen.main.brightness
+                    } else {
+                        mode = .volume
+                        volumeBase = CGFloat(AVAudioSession.sharedInstance().outputVolume)
+                    }
+                }
+            }
+            return
+        }
+
+        switch mode {
+        case .seeking:
+            // 每 10pt = 1 秒
+            let delta = Double(v.translation.width) / 10.0
+            let t = min(max(dragStartProgress + delta, 0), max(duration, 1))
+            scrubTarget = t
+            progress = t
+            showHud("\(fmt(t)) / \(fmt(duration))", icon: "arrow.left.and.right")
+
+        case .brightness:
+            let delta = -Double(v.translation.height) / Double(size.height)
+            let b = min(max(Double(brightnessBase) + delta, 0.02), 1.0)
+            UIScreen.main.brightness = CGFloat(b)
+            showHud("\(Int(b * 100))%", icon: "sun.max.fill")
+
+        case .volume:
+            let delta = -Double(v.translation.height) / Double(size.height)
+            let target = min(max(Double(volumeBase) + delta, 0.0), 1.0)
+            setSystemVolume(Float(target))
+            showHud("\(Int(target * 100))%", icon: "speaker.wave.3.fill")
+
+        case .undecided:
+            // 位移还很小，检查是否该触发长按
+            if Date().timeIntervalSince(touchStart) >= 0.32, !longPressFired {
+                longPressFired = true
+                mode = .longPressing
+                rateBeforeBoost = rate
+                player.rate = 2.0
+                showHud("2x 倍速", icon: "forward.fill", sticky: true)
+            }
+
+        case .longPressing, .ignored:
+            break
+        }
+    }
+
+    private func onTouchEnded(_ v: DragGesture.Value, in size: CGSize) {
+        let dist = max(abs(v.translation.width), abs(v.translation.height))
+        let elapsed = Date().timeIntervalSince(touchStart)
+
+        switch mode {
+        case .seeking:
+            player.seek(to: CMTime(seconds: scrubTarget, preferredTimescale: 600),
+                        toleranceBefore: .zero, toleranceAfter: .zero)
+            progress = scrubTarget
+            hideHudSoon()
+
+        case .brightness, .volume:
+            hideHudSoon()
+
+        case .longPressing:
+            player.rate = rateBeforeBoost
+            hideHudSoon(immediately: false)
+
+        case .ignored:
+            break
+
+        case .undecided:
+            // 没有明显位移 → 点击类
+            if dist < 12, elapsed < 0.32 {
+                let now = Date()
+                let isDouble = now.timeIntervalSince(lastTapTime) < 0.30
+                if isDouble, abs(v.startLocation.x - lastTapX) < 60 {
+                    // 双击
+                    lastTapTime = .distantPast
+                    if v.startLocation.x < size.width / 2 {
+                        skip(-10)
+                        showHud("« 10秒", icon: "gobackward.10")
+                    } else {
+                        skip(10)
+                        showHud("10秒 »", icon: "goforward.10")
+                    }
+                } else {
+                    // 单击
+                    lastTapTime = now
+                    lastTapX = v.startLocation.x
+                    toggleControls()
+                }
+            }
+        }
+
+        // 复位
+        mode = .undecided
+        longPressFired = false
+    }
+
+    private func setSystemVolume(_ v: Float) {
+        let mpv = MPVolumeView()
+        mpv.frame = CGRect(x: -1000, y: -1000, width: 1, height: 1)
+        for sub in mpv.subviews where sub is UISlider {
+            (sub as? UISlider)?.value = v
+            break
+        }
+    }
+
+    // MARK: - HUD
+
+    private func showHud(_ text: String, icon: String?, sticky: Bool = false) {
+        hudTask?.cancel()
+        hudText = text
+        hudIcon = icon
+        if !sticky { hideHudSoon() }
+    }
+
+    private func hideHudSoon(immediately: Bool = true) {
+        hudTask?.cancel()
+        let delay: UInt64 = immediately ? 550_000_000 : 250_000_000
+        hudTask = Task {
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { hudText = nil; hudIcon = nil }
+        }
+    }
+
+    private func hudView(_ text: String) -> some View {
+        VStack(spacing: 6) {
+            if let hudIcon {
+                Image(systemName: hudIcon)
+                    .font(.system(size: 28))
+                    .foregroundStyle(.white)
+            }
+            Text(text)
+                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .background(.black.opacity(0.62))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // MARK: - 控制层
+
+    private var controlsLayer: some View {
+        VStack(spacing: 0) {
+            topBar
+            Spacer(minLength: 0)
+            centerRow
+            Spacer(minLength: 0)
+            bottomBar
+        }
+    }
 
     private var topBar: some View {
         HStack(spacing: 10) {
@@ -103,7 +331,7 @@ struct ResolverPlayerView: View {
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 36, height: 36)
-                    .background(.black.opacity(0.45))
+                    .background(.black.opacity(0.42))
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
@@ -114,7 +342,7 @@ struct ResolverPlayerView: View {
                     .foregroundStyle(.white)
                     .lineLimit(1)
                 if let c = current {
-                    Text("第 \(c.index) 集")
+                    Text("第 \(c.index) 集 / 共 \(detail?.totalEpisodes ?? 0) 集")
                         .font(.system(size: 11))
                         .foregroundStyle(.white.opacity(0.65))
                 }
@@ -128,7 +356,7 @@ struct ResolverPlayerView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
-                        .background(.black.opacity(0.45))
+                        .background(.black.opacity(0.42))
                         .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
@@ -140,7 +368,7 @@ struct ResolverPlayerView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(danmaku.settings.enabled ? .white : .white.opacity(0.45))
                     .frame(width: 36, height: 36)
-                    .background(.black.opacity(0.45))
+                    .background(.black.opacity(0.42))
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
@@ -154,11 +382,9 @@ struct ResolverPlayerView: View {
                 }
                 Divider()
                 ForEach([Float(0.75), 1.0, 1.25, 1.5, 2.0], id: \.self) { r in
-                    Button {
-                        player.rate = r
-                    } label: {
+                    Button { setRate(r) } label: {
                         Label(r == 1.0 ? "正常速度" : "\(r)x",
-                              systemImage: abs(player.rate - r) < 0.01
+                              systemImage: abs(rate - r) < 0.01
                                 ? "checkmark" : "speedometer")
                     }
                 }
@@ -181,78 +407,119 @@ struct ResolverPlayerView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 36, height: 36)
-                    .background(.black.opacity(0.45))
+                    .background(.black.opacity(0.42))
                     .clipShape(Circle())
             }
         }
         .padding(.horizontal, 12)
         .padding(.top, 8)
-        .padding(.bottom, 30)
+        .padding(.bottom, 28)
         .background(
-            LinearGradient(colors: [.black.opacity(0.75), .clear],
+            LinearGradient(colors: [.black.opacity(0.72), .clear],
                            startPoint: .top, endPoint: .bottom)
         )
     }
 
-    // MARK: 底部
-
-    private var bottomBar: some View {
-        HStack(spacing: 12) {
-            Text(fmt(progress))
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.85))
-
-            // 简洁进度条（可拖）
-            GeometryReader { g in
-                let w = g.size.width
-                let total = max(duration, 1)
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.25)).frame(height: 3)
-                    Capsule().fill(Palette.accent)
-                        .frame(width: w * CGFloat(min(progress / total, 1)), height: 3)
-                }
-                .frame(height: 18)
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { v in
-                            let ratio = min(max(v.location.x / w, 0), 1)
-                            let t = Double(ratio) * total
-                            progress = t
-                            player.seek(to: CMTime(seconds: t, preferredTimescale: 600),
-                                        toleranceBefore: .zero, toleranceAfter: .zero)
-                        }
-                )
+    private var centerRow: some View {
+        HStack(spacing: 48) {
+            Button { skip(-15) } label: {
+                Image(systemName: "gobackward.15")
+                    .font(.system(size: 30, weight: .light))
+                    .foregroundStyle(.white)
             }
-            .frame(height: 18)
+            .buttonStyle(.plain)
 
-            Text(fmt(duration))
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.7))
+            Button { togglePlay() } label: {
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 32))
+                    .foregroundStyle(.white)
+                    .frame(width: 66, height: 66)
+                    .background(.black.opacity(0.32))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
 
-            Button { showEpisodes = true } label: {
-                HStack(spacing: 3) {
-                    Image(systemName: "list.bullet").font(.system(size: 10))
-                    Text("选集").font(.system(size: 11, weight: .semibold))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(.white.opacity(0.18))
-                .clipShape(Capsule())
+            Button { skip(15) } label: {
+                Image(systemName: "goforward.15")
+                    .font(.system(size: 30, weight: .light))
+                    .foregroundStyle(.white)
             }
             .buttonStyle(.plain)
         }
+    }
+
+    private var bottomBar: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                Text(fmt(progress))
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .frame(width: 46, alignment: .leading)
+
+                GeometryReader { g in
+                    let w = g.size.width
+                    let total = max(duration, 1)
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(.white.opacity(0.22)).frame(height: 3)
+                        Capsule().fill(.white.opacity(0.38))
+                            .frame(width: w * CGFloat(min(bufferedEnd / total, 1)), height: 3)
+                        Capsule().fill(Palette.accent)
+                            .frame(width: w * CGFloat(min(progress / total, 1)), height: 3)
+                        Circle().fill(.white).frame(width: 10, height: 10)
+                            .offset(x: w * CGFloat(min(progress / total, 1)) - 5)
+                    }
+                    .frame(height: 18)
+                    .contentShape(Rectangle())
+                }
+                .frame(height: 18)
+
+                Text(fmt(duration))
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .frame(width: 46, alignment: .trailing)
+            }
+
+            HStack(spacing: 14) {
+                Button { setRate(rate >= 2.0 ? 1.0 : rate + 0.25) } label: {
+                    Text(rate == 1.0 ? "倍速" : String(format: "%.2gx", rate))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 9).padding(.vertical, 5)
+                        .background(.white.opacity(0.16))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+
+                Button { showEpisodes = true } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "list.bullet").font(.system(size: 10))
+                        Text("选集").font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 9).padding(.vertical, 5)
+                    .background(.white.opacity(0.16))
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+
+                if danmaku.total > 0 {
+                    Text("弹幕 \(danmaku.total)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+                Spacer()
+            }
+        }
         .padding(.horizontal, 14)
         .padding(.bottom, 20)
-        .padding(.top, 34)
+        .padding(.top, 30)
         .background(
-            LinearGradient(colors: [.clear, .black.opacity(0.8)],
+            LinearGradient(colors: [.clear, .black.opacity(0.78)],
                            startPoint: .top, endPoint: .bottom)
         )
     }
 
-    // MARK: 错误
+    // MARK: - 错误
 
     private func errorOverlay(_ msg: String) -> some View {
         VStack(spacing: 12) {
@@ -268,11 +535,11 @@ struct ResolverPlayerView: View {
                 .clipShape(Capsule()).buttonStyle(.plain)
         }
         .padding(20)
-        .background(.black.opacity(0.7))
+        .background(.black.opacity(0.75))
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
-    // MARK: 弹层
+    // MARK: - 弹层
 
     private var episodeSheet: some View {
         NavigationStack {
@@ -408,7 +675,7 @@ struct ResolverPlayerView: View {
         }
     }
 
-    // MARK: 加载
+    // MARK: - 加载
 
     private func loadDetail() async {
         guard settings.hasResolver else {
@@ -452,7 +719,9 @@ struct ResolverPlayerView: View {
             current = ep
             duration = 0
             progress = 0
+            bufferedEnd = 0
             lastSavedSecond = -1
+            player.rate = rate
 
             if let rec = library.record(for: seriesID),
                rec.lastEpisode == ep.index,
@@ -466,6 +735,7 @@ struct ResolverPlayerView: View {
             isPlaying = true
             installTimeObserver()
             installEndObserver()
+            scheduleHideControls()
 
             if let d = detail {
                 library.touchHistory(
@@ -499,7 +769,7 @@ struct ResolverPlayerView: View {
             danmaku.load(page.items ?? [])
             danmaku.rebuild(laneCount: 10)
         } catch {
-            // 静默失败，不打扰播放
+            // 静默
         }
     }
 
@@ -533,7 +803,7 @@ struct ResolverPlayerView: View {
         if wasPlaying { player.play() }
     }
 
-    // MARK: 观察
+    // MARK: - 观察
 
     private func observe(item: AVPlayerItem) {
         statusObs?.invalidate()
@@ -549,16 +819,24 @@ struct ResolverPlayerView: View {
                 }
             }
         }
+        bufferObs?.invalidate()
+        bufferObs = item.observe(\.loadedTimeRanges, options: [.new]) { obj, _ in
+            Task { @MainActor in
+                if let r = obj.loadedTimeRanges.last?.timeRangeValue {
+                    bufferedEnd = (r.start + r.duration).seconds
+                }
+            }
+        }
     }
 
     private func installTimeObserver() {
         guard timeObserver == nil else { return }
         timeObserver = player.addPeriodicTimeObserver(
-            forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
+            forInterval: CMTime(seconds: 0.2, preferredTimescale: 600),
             queue: .main
         ) { t in
             let s = t.seconds
-            if s.isFinite { progress = s }
+            if s.isFinite, mode != .seeking { progress = s }
             let d = player.currentItem?.duration.seconds ?? 0
             if d.isFinite, d > 0 { duration = d }
 
@@ -583,8 +861,47 @@ struct ResolverPlayerView: View {
         if let t = timeObserver { player.removeTimeObserver(t) }
         timeObserver = nil
         statusObs?.invalidate(); statusObs = nil
+        bufferObs?.invalidate(); bufferObs = nil
         if let e = endObserver { NotificationCenter.default.removeObserver(e) }
         endObserver = nil
+    }
+
+    // MARK: - 控制
+
+    private func togglePlay() {
+        if isPlaying { player.pause() } else { player.play() }
+        isPlaying.toggle()
+        scheduleHideControls()
+    }
+
+    private func skip(_ seconds: Double) {
+        let target = min(max(player.currentTime().seconds + seconds, 0), max(duration, 1))
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
+                    toleranceBefore: .zero, toleranceAfter: .zero)
+        progress = target
+    }
+
+    private func setRate(_ r: Float) {
+        rate = r
+        if mode != .longPressing { player.rate = r }
+    }
+
+    private func toggleControls() {
+        withAnimation(.easeInOut(duration: 0.18)) { controlsVisible.toggle() }
+        if controlsVisible { scheduleHideControls() }
+    }
+
+    private func scheduleHideControls() {
+        hideTask?.cancel()
+        hideTask = Task {
+            try? await Task.sleep(nanoseconds: 4_500_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                if !showEpisodes && !showQuality && !showDanmakuSettings {
+                    withAnimation(.easeInOut(duration: 0.25)) { controlsVisible = false }
+                }
+            }
+        }
     }
 
     private func playNext() async {
@@ -597,6 +914,7 @@ struct ResolverPlayerView: View {
 
     private func teardown() {
         hideTask?.cancel()
+        hudTask?.cancel()
         removeObservers()
         player.pause()
     }
@@ -607,5 +925,29 @@ struct ResolverPlayerView: View {
         let h = s / 3600, m = (s % 3600) / 60, ss = s % 60
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, ss)
                      : String(format: "%02d:%02d", m, ss)
+    }
+}
+
+// MARK: - 视频层
+
+private struct PlayerSurface: UIViewRepresentable {
+    let player: AVPlayer
+    func makeUIView(context: Context) -> PlayerUIView {
+        let v = PlayerUIView()
+        v.backgroundColor = .black
+        v.attach(player)
+        return v
+    }
+    func updateUIView(_ uiView: PlayerUIView, context: Context) {
+        uiView.attach(player)
+    }
+}
+
+final class PlayerUIView: UIView {
+    override static var layerClass: AnyClass { AVPlayerLayer.self }
+    private var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    func attach(_ player: AVPlayer) {
+        playerLayer.player = player
+        playerLayer.videoGravity = .resizeAspect
     }
 }
