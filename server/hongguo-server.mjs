@@ -47,7 +47,7 @@ const WEB_UA =
 const SEG_SIZE = 32 * 1024 * 1024;
 
 // 版本号：解密/头部处理逻辑有改动就 +1
-const SERVER_VERSION = "8";
+const SERVER_VERSION = "11";
 
 // ---------------------------------------------------------------- 工具
 
@@ -508,7 +508,16 @@ function prepareCencHeader(data, key) {
   }
   const parsed = tracks.map((t) => parseTrack(moovBody, t)).filter(Boolean);
   const samples = key ? buildSamples(data, parsed) : [];
+
+  // header 只到 moov 结束。mdat 头等非样本字节由 /api/keys 的 gaps
+  // 报告给客户端，客户端从 CDN 原样透传，保证偏移与 stco 一致。
   const header = Buffer.from(data.subarray(0, moov.offset + moov.size));
+  // 抖音把标准 hvcC 改名成 bv2C，AVPlayer 不认识这个私有 box，
+  // 拿不到 HEVC 解码配置 → 报「操作已停止」/ 黑屏。
+  // body 结构与 hvcC 完全一致（configurationVersion=1, profile=Main），
+  // 改回标准名即可。
+  replaceFourcc(header, "bv2C", "hvcC");
+  replaceFourcc(header, "bv2c", "hvcC");
   replaceFourcc(header, "encv", "hvc1");
   replaceFourcc(header, "enca", "mp4a");
   replaceSinf(header);
@@ -1340,21 +1349,36 @@ const server = http.createServer(async (req, res) => {
       //   - header 用 base64
       // 这样一集大约 100~200 KB，比转发 6 MB 小 30~60 倍。
       let samplesPacked = null;
+      let gapsStr = "";
       if (s.prepared && s.prepared.samples && s.prepared.samples.length) {
+        const headerLen = s.prepared.header.length;
+        // 按原始文件偏移排序：多轨道的样本可能交错，顺序不能靠 track 顺序
+        const ordered = [...s.prepared.samples].sort((a, b) => a.start - b.start);
+
         const sizes = [];
         const ivs = [];
-        let prevEnd = 0;
-        for (const x of s.prepared.samples) {
+        for (const x of ordered) {
           sizes.push(x.end - x.start);
-          prevEnd = x.end;
           // CENC IV 前 8 字节有效，后 8 字节是 0
           ivs.push(Buffer.from(x.iv).subarray(0, 8));
         }
+
+        // 空洞 = 不属于任何样本、也不属于 header 的字节
+        // （mdat box 头、box 间填充、尾部 box 等）
+        // 客户端必须原样从 CDN 取回这些字节，才能保持与 stco 偏移一致。
+        const gaps = [];
+        let cursor = headerLen;
+        for (const x of ordered) {
+          if (x.start > cursor) gaps.push([cursor, x.start - cursor]);
+          cursor = Math.max(cursor, x.end);
+        }
+        if (cursor < s.total) gaps.push([cursor, s.total - cursor]);
+        gapsStr = gaps.map(([st, sz]) => `${st}:${sz}`).join(",");
+
         samplesPacked = {
           count: sizes.length,
-          // 样本大小：逗号分隔的十进制，gzip 后压缩率很高
+          first: ordered.length ? ordered[0].start : headerLen,
           sizes: sizes.join(","),
-          // IV：连续 8 字节 × count，整体 base64
           ivs: Buffer.concat(ivs).toString("base64"),
         };
       }
@@ -1371,10 +1395,13 @@ const server = http.createServer(async (req, res) => {
         cdn_url: s.url,
         quality: s.quality,
         duration: s.duration,
+        // 虚拟文件与原始文件布局完全一致，total 即虚拟文件长度
         total_bytes: s.total,
         encrypted: s.encrypted,
         key_hex: s.key ? Buffer.from(s.key).toString("hex") : null,
         header_b64: header,
+        // 空洞列表 "start:size,start:size"
+        gaps: gapsStr,
         samples: samplesPacked,
       }, req);
       return;

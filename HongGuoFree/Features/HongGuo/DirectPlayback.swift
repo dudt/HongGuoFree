@@ -1,15 +1,22 @@
 // 直连播放器：客户端自己解 CENC，视频流不经过自建服务器
 //
-// 带宽对比（实测一集 7.22 MB）：
-//   转发模式  /api/stream   → 服务器上传 7.57 MB
-//   直连模式  /api/keys     → 服务器上传 0.05 MB（gzip 后）
-//   省 146 倍
+// 带宽对比（实测一集 13.56 MB）：
+//   转发模式  /api/stream   → 服务器上传 13.56 MB
+//   直连模式  /api/keys     → 服务器上传 ~0.4 MB（gzip 后）
+//   省 30+ 倍，且与集时长无关（密钥包体积只跟样本数有关）
 //
-// 原理：
-//   1. /api/keys 拿到 CDN 地址、AES-128 密钥、每样本 IV、去加密标记的头部
-//   2. AVAssetResourceLoader 拦截播放器对 custom scheme 的请求
-//   3. 按 Range 去 CDN 拉密文，用样本表逐样本 AES-128-CTR 解密
-//   4. 把明文回给播放器
+// 关键设计：虚拟文件与原始文件「布局完全一致」
+//   早期版本把 [header, 样本1, 样本2, ...] 重新拼成连续文件，
+//   但 moov 里 stco 记录的是原始文件的绝对偏移，两者差一个
+//   mdat box 头（16 字节），导致每个样本都错位，
+//   AVPlayer 解出来是垃圾数据并报「操作已停止」。
+//
+//   现在的做法：
+//     - 文件长度 = 原始 total_bytes
+//     - header 区间（ftyp+moov，已清加密标记）用本地清理版
+//     - 样本区间：从 CDN 拉密文 → AES-128-CTR 解密
+//     - 空洞区间（mdat 头等非样本字节）：原样从 CDN 透传
+//   这样任意偏移都能正确映射，stco 天然对得上。
 import Foundation
 import AVFoundation
 import CommonCrypto
@@ -19,6 +26,7 @@ import CommonCrypto
 struct HGKeyBundle: Decodable {
     struct Samples: Decodable {
         var count: Int
+        var first: Int?        // 第一个样本在原始文件中的偏移
         var sizes: String      // "1234,5678,..."
         var ivs: String        // base64，8 字节 × count
     }
@@ -32,10 +40,12 @@ struct HGKeyBundle: Decodable {
     var encrypted: Bool?
     var keyHex: String?
     var headerB64: String?
+    /// "start:size,start:size" —— 非样本、需原样透传的区间
+    var gaps: String?
     var samples: Samples?
 
     enum CodingKeys: String, CodingKey {
-        case ok, mode, quality, duration, encrypted, samples
+        case ok, mode, quality, duration, encrypted, gaps, samples
         case cdnURL = "cdn_url"
         case totalBytes = "total_bytes"
         case keyHex = "key_hex"
@@ -82,61 +92,79 @@ extension HGServerClient {
 // MARK: - 解密器
 
 final class CENCDecryptor {
+    struct Segment {
+        var start: Int64
+        var size: Int64
+        var iv: Data?      // nil = 空洞，原样透传
+    }
+
     let key: Data
     let header: Data
-    /// 每个样本的 (在解密后文件中的起始偏移, 大小, IV)
-    let samples: [(offset: Int64, size: Int64, iv: Data)]
     let totalSize: Int64
+    /// 按 start 升序排列的所有区间（样本 + 空洞）
+    let segments: [Segment]
 
     init?(bundle: HGKeyBundle) {
         guard let keyHex = bundle.keyHex,
               let keyData = Data(hexString: keyHex), keyData.count == 16 else { return nil }
         guard let hb = bundle.headerB64, let headerData = Data(base64Encoded: hb) else { return nil }
         guard let s = bundle.samples, let ivData = Data(base64Encoded: s.ivs) else { return nil }
+        guard let total = bundle.totalBytes, total > 0 else { return nil }
 
         let sizes = s.sizes.split(separator: ",").compactMap { Int64($0) }
         guard sizes.count == s.count, ivData.count >= s.count * 8 else { return nil }
 
         self.key = keyData
         self.header = headerData
+        self.totalSize = total
 
-        var list: [(Int64, Int64, Data)] = []
-        list.reserveCapacity(s.count)
-        var off: Int64 = 0
+        // 样本区间
+        var segs: [Segment] = []
+        segs.reserveCapacity(s.count)
+        var off = Int64(s.first ?? headerData.count)
         for i in 0..<s.count {
             let iv = ivData.subdata(in: (i * 8)..<((i + 1) * 8))
-            list.append((off, sizes[i], iv))
+            segs.append(Segment(start: off, size: sizes[i], iv: iv))
             off += sizes[i]
         }
-        self.samples = list
-        // 头部 + 所有样本 = 解密后文件总长
-        self.totalSize = Int64(headerData.count) + off
+
+        // 空洞区间（服务端给的 "start:size,..."）
+        if let g = bundle.gaps, !g.isEmpty {
+            for pair in g.split(separator: ",") {
+                let parts = pair.split(separator: ":")
+                guard parts.count == 2,
+                      let st = Int64(parts[0]), let sz = Int64(parts[1]), sz > 0 else { continue }
+                segs.append(Segment(start: st, size: sz, iv: nil))
+            }
+        }
+        segs.sort { $0.start < $1.start }
+        self.segments = segs
     }
 
-    /// 解密 [start, end] 区间（解密后文件坐标）
-    func decrypt(cipher: Data, cipherStart: Int64, range: Range<Int64>) -> Data {
+    /// 解密/透传 [range] 区间（原始文件坐标）
+    /// 返回的数据长度严格等于 range.count
+    func produce(cipher: Data, cipherStart: Int64, range: Range<Int64>) -> Data {
         var out = Data(count: range.count)
-
-        // 1) 头部区域：直接用清理过的 header
         let headerLen = Int64(header.count)
+
+        // 1) header 区间：用本地清理版（去掉了 encv/sinf/senc/saiz/saio）
         if range.lowerBound < headerLen {
             let from = Int(range.lowerBound)
             let to = Int(min(range.upperBound, headerLen))
             if to > from {
-                out.replaceSubrange(0..<(to - from), with: header.subdata(in: from..<to))
+                let piece = header.subdata(in: from..<to)
+                out.replaceSubrange(0..<piece.count, with: piece)
             }
         }
 
-        // 2) 样本区域
-        let sampleBase = headerLen
-        for (sOff, sSize, iv) in samples {
-            let absStart = sampleBase + sOff
-            let absEnd = absStart + sSize
-            if absEnd <= range.lowerBound { continue }
-            if absStart >= range.upperBound { break }
+        // 2) 样本 / 空洞区间
+        for seg in segments {
+            let segEnd = seg.start + seg.size
+            if segEnd <= range.lowerBound { continue }
+            if seg.start >= range.upperBound { break }
 
-            let from = max(absStart, range.lowerBound)
-            let to = min(absEnd, range.upperBound)
+            let from = max(seg.start, range.lowerBound)
+            let to = min(segEnd, range.upperBound)
             guard to > from else { continue }
 
             let cFrom = Int(from - cipherStart)
@@ -144,11 +172,17 @@ final class CENCDecryptor {
             guard cFrom >= 0, cTo <= cipher.count, cFrom < cTo else { continue }
 
             let chunk = cipher.subdata(in: cFrom..<cTo)
-            let skip = Int(from - absStart)
+            let dFrom = Int(from - range.lowerBound)
 
-            if let plain = Self.ctr(key: key, iv: iv, skip: skip, data: chunk) {
-                let dFrom = Int(from - range.lowerBound)
-                out.replaceSubrange(dFrom..<(dFrom + plain.count), with: plain)
+            if let iv = seg.iv {
+                // 样本：解密
+                let skip = Int(from - seg.start)
+                if let plain = Self.ctr(key: key, iv: iv, skip: skip, data: chunk) {
+                    out.replaceSubrange(dFrom..<(dFrom + plain.count), with: plain)
+                }
+            } else {
+                // 空洞：原样透传
+                out.replaceSubrange(dFrom..<(dFrom + chunk.count), with: chunk)
             }
         }
         return out
@@ -158,11 +192,16 @@ final class CENCDecryptor {
     static func ctr(key: Data, iv: Data, skip: Int, data: Data) -> Data? {
         guard key.count == 16, !data.isEmpty else { return nil }
 
-        // CENC 的 8 字节 IV 左补 0 成 16 字节 counter
+        // CENC 的 8 字节 IV 右补 0 成 16 字节 counter（IV || 0^8）
+        // 注意：不是左补零。左补零解出来是垃圾数据，
+        // AVPlayer 会报「操作已停止」。实测对比服务端输出确认：
+        //   iv=1b6729055b854570
+        //   右补0 -> 00000111 0079...  ✓ 正确 HEVC NAL 头
+        //   左补0 -> 1ad7d07e...       ✗ 垃圾
         var counter = [UInt8](repeating: 0, count: 16)
         let ivb = [UInt8](iv)
         let n = min(ivb.count, 16)
-        for i in 0..<n { counter[16 - n + i] = ivb[i] }
+        for i in 0..<n { counter[i] = ivb[i] }
 
         // 把 skip 加进 counter（大端）
         var carry = skip
@@ -174,7 +213,6 @@ final class CENCDecryptor {
             idx -= 1
         }
 
-        // Swift 独占访问：闭包里不能同时读写 out，用局部变量中转
         let outCount = data.count
         var buffer = [UInt8](repeating: 0, count: outCount)
         var moved = 0
@@ -226,6 +264,7 @@ final class CENCResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
     private let cdnURL: URL
     private let session: URLSession
     private let queue = DispatchQueue(label: "hg.cenc", qos: .userInitiated)
+    private let ua = "com.phoenix.read/74232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)"
 
     init(decryptor: CENCDecryptor, cdnURL: URL) {
         self.decryptor = decryptor
@@ -233,12 +272,12 @@ final class CENCResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
         let cfg = URLSessionConfiguration.default
         cfg.timeoutIntervalForRequest = 30
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
+        cfg.httpMaximumConnectionsPerHost = 6
         self.session = URLSession(configuration: cfg)
         super.init()
     }
 
     static func makeAssetURL() -> URL {
-        // 用自定义 scheme 让 AVPlayer 走 resourceLoader
         URL(string: "\(scheme)://stream/index.mp4")!
     }
 
@@ -251,7 +290,6 @@ final class CENCResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
             return true
         }
 
-        // 填充内容信息
         info.contentType = "video/mp4"
         info.contentLength = decryptor.totalSize
         info.isByteRangeAccessSupported = true
@@ -266,7 +304,7 @@ final class CENCResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
             return true
         }
 
-        // 头部区域完全在本地，不用请求 CDN
+        // 整段都在 header 内 → 本地直接给
         let headerLen = Int64(decryptor.header.count)
         if start < headerLen {
             let from = Int(start)
@@ -280,9 +318,9 @@ final class CENCResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
             }
         }
 
-        // 需要 CDN 的部分
-        let cdnFrom = max(start, headerLen) - headerLen
-        let cdnTo = end - headerLen
+        // 其余部分从 CDN 拉（密文），本地解密/透传
+        let cdnFrom = max(start, headerLen)
+        let cdnTo = end
         guard cdnTo >= cdnFrom else {
             loadingRequest.finishLoading()
             return true
@@ -290,23 +328,40 @@ final class CENCResourceLoader: NSObject, AVAssetResourceLoaderDelegate {
 
         var req = URLRequest(url: cdnURL)
         req.setValue("bytes=\(cdnFrom)-\(cdnTo)", forHTTPHeaderField: "Range")
-        req.setValue("com.phoenix.read/74232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)",
-                     forHTTPHeaderField: "User-Agent")
+        req.setValue(ua, forHTTPHeaderField: "User-Agent")
         req.setValue("https://novel.snssdk.com/", forHTTPHeaderField: "Referer")
 
-        let task = session.dataTask(with: req) { [weak self] data, _, _ in
+        let task = session.dataTask(with: req) { [weak self] data, resp, err in
             guard let self else { return }
             self.queue.async {
                 defer { loadingRequest.finishLoading() }
-                guard let data, !data.isEmpty else { return }
 
-                let plain = self.decryptor.decrypt(
-                    cipher: data,
+                guard let data, !data.isEmpty else {
+                    // CDN 失败：给零填充，避免播放器卡死（会表现为静音/黑帧，
+                    // 但不会像之前那样整段停摆）
+                    if err != nil {
+                        let need = Int(end - max(start, headerLen) + 1)
+                        if need > 0 {
+                            dataReq.respond(with: Data(count: need))
+                        }
+                    }
+                    return
+                }
+
+                // 校验 CDN 返回的长度；不足时补齐，避免越界
+                let want = Int(cdnTo - cdnFrom + 1)
+                var cipher = data
+                if cipher.count < want {
+                    cipher.append(Data(count: want - cipher.count))
+                }
+
+                let plain = self.decryptor.produce(
+                    cipher: cipher,
                     cipherStart: cdnFrom,
                     range: start..<(end + 1)
                 )
 
-                // 头部已单独 respond 过，这里只发样本部分
+                // header 部分已单独 respond 过，这里只发其后
                 if start < headerLen {
                     let skip = Int(headerLen - start)
                     if skip < plain.count {
