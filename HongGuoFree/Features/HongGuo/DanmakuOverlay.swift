@@ -13,19 +13,19 @@ struct DanmakuOverlay: View {
         GeometryReader { geo in
             let w = geo.size.width
             let h = geo.size.height
-            let laneHeight = min(28, h / CGFloat(max(engine.laneCount, 1) + 1))
+            let laneHeight = min(30, h / CGFloat(max(engine.laneCount, 1) + 2))
 
             ZStack(alignment: .topLeading) {
                 ForEach(engine.active) { d in
                     Text(d.text)
                         .font(.system(size: engine.fontSize, weight: .medium))
                         .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.85), radius: 2, x: 0, y: 1)
+                        .shadow(color: .black.opacity(0.9), radius: 2, x: 0, y: 1)
                         .lineLimit(1)
                         .fixedSize()
                         .offset(
                             x: xOffset(for: d, width: w),
-                            y: 8 + CGFloat(d.lane) * laneHeight
+                            y: 10 + CGFloat(d.lane) * laneHeight
                         )
                 }
             }
@@ -34,13 +34,12 @@ struct DanmakuOverlay: View {
         }
     }
 
-    /// 从右侧 w 移动到左侧 -textWidth
+    /// 从右侧 w 移动到左侧 -w，全程 duration 秒
     private func xOffset(for d: DanmakuEngine.ActiveDanmaku, width: CGFloat) -> CGFloat {
         let elapsed = currentTime - d.startSec
-        let progress = max(0, min(1, elapsed / d.duration))
-        // 起点在屏幕右侧，终点在屏幕左侧外
+        let progress = max(0, min(1, elapsed / max(d.duration, 0.1)))
         let start = width
-        let end = -width * 0.6
+        let end = -width
         return start + (end - start) * CGFloat(progress)
     }
 }

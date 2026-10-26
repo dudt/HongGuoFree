@@ -484,38 +484,61 @@ struct ResolverPlayerView: View {
         }
     }
 
-    /// 拉弹幕。首次拉第一页，之后按 cursor 继续。
+    /// 拉整集弹幕。
+    ///
+    /// 上游按「时间窗」返回（一页约 30~90 秒窗口），而且很多剧的弹幕
+    /// 集中在片尾，只拉第一页会拿到空结果。所以这里按 30 秒步长
+    /// 遍历整集时长，把每个窗口都拉一遍再去重。
     private func loadDanmaku(for ep: HGServerEpisode, reset: Bool = false) async {
         guard !dmLoading else { return }
         dmLoading = true
         defer { dmLoading = false }
 
-        do {
-            var page = try await client.danmaku(
-                vid: ep.vid, seriesID: seriesID, cursor: reset ? "" : dmCursor
-            )
-            var collected = page.items ?? []
-
-            // 自动翻几页，凑够一集主要时段的弹幕
-            var guardCount = 0
-            while page.hasMore == true, let next = page.nextCursor, !next.isEmpty,
-                  guardCount < 4 {
-                guardCount += 1
-                let escaped = next.addingPercentEncoding(
-                    withAllowedCharacters: .alphanumerics) ?? ""
-                page = try await client.danmaku(
-                    vid: ep.vid, seriesID: seriesID, cursor: escaped
-                )
-                collected.append(contentsOf: page.items ?? [])
+        // duration 此时可能还是 0（AVPlayer 未就绪），优先用服务端给的时长
+        var secs = duration
+        if secs <= 0 {
+            if let p = try? await client.play(vid: ep.vid), let d = p.duration, d > 0 {
+                secs = d
             }
-
-            dmCursor = page.nextCursor ?? ""
-            dmTotal = page.total ?? collected.count
-            danmaku.load(collected)
-            log("弹幕 \(collected.count) 条 / 共 \(dmTotal)")
-        } catch {
-            log("弹幕失败 \(error.localizedDescription)")
         }
+        let total = max(Int(secs.rounded()), 120)
+        let step = 30
+        var collected: [String: HGDmakuItem] = [:]
+        var reportedTotal = 0
+
+        // 从 0 开始，每 30 秒一个窗口
+        var offset = 0
+        while offset <= total + step {
+            do {
+                let page = try await client.danmaku(
+                    vid: ep.vid, seriesID: seriesID, cursor: "", offsetMs: offset * 1000
+                )
+                if reportedTotal == 0 { reportedTotal = page.total ?? 0 }
+                for it in page.items ?? [] {
+                    collected[it.id] = it
+                }
+                // 该窗口还有更多：沿 cursor 继续
+                var cur = page.nextCursor ?? ""
+                var guardCount = 0
+                while page.hasMore == true, !cur.isEmpty, guardCount < 2 {
+                    guardCount += 1
+                    let more = try await client.danmaku(
+                        vid: ep.vid, seriesID: seriesID, cursor: cur
+                    )
+                    for it in more.items ?? [] { collected[it.id] = it }
+                    if more.nextCursor == cur { break }
+                    cur = more.nextCursor ?? ""
+                }
+            } catch {
+                log("弹幕 offset=\(offset)s 失败 \(error.localizedDescription)")
+            }
+            offset += step
+        }
+
+        let items = collected.values.sorted { $0.offsetMs < $1.offsetMs }
+        dmTotal = max(reportedTotal, items.count)
+        danmaku.load(items)
+        log("弹幕 \(items.count) 条 / 上游报告 \(dmTotal)")
     }
 
     private func switchQuality(_ v: HGVariant) async {
@@ -570,7 +593,7 @@ struct ResolverPlayerView: View {
     private func installTimeObserver() {
         guard let p = player, timeObserver == nil else { return }
         timeObserver = p.addPeriodicTimeObserver(
-            forInterval: CMTime(seconds: 0.4, preferredTimescale: 600),
+            forInterval: CMTime(seconds: 0.1, preferredTimescale: 600),
             queue: .main
         ) { t in
             guard !isScrubbing else { return }

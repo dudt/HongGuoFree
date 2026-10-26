@@ -659,6 +659,19 @@ async function resolveStream(vid) {
  */
 async function fetchDanmaku(vid, seriesId, durationMs, cursor = "", offsetMs = 0) {
   const dev = freshDevice();
+
+  // cursor 是上游返回的 JSON 串，形如
+  //   {"start_offset_time":0,"end_offset_time":30000,...}
+  // 翻页时 business_param.start_offset_time 必须与 cursor 里的 start 一致，
+  // 否则上游判 110001。
+  let startOffset = offsetMs;
+  if (cursor) {
+    const c = jsonBody(cursor);
+    if (c && Number.isFinite(Number(c.start_offset_time))) {
+      startOffset = Number(c.start_offset_time);
+    }
+  }
+
   const body = JSON.stringify({
     group_id: String(vid),
     group_type: 30,
@@ -672,7 +685,7 @@ async function fetchDanmaku(vid, seriesId, durationMs, cursor = "", offsetMs = 0
     compliance_status: 0,
     business_param: {
       book_id: String(seriesId),
-      start_offset_time: offsetMs,
+      start_offset_time: startOffset,
       playlet_item_duration: durationMs,
       need_danmaku_guide_type: [],
     },

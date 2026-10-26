@@ -40,17 +40,38 @@ struct HGDmakuPage: Decodable {
 
 extension HGServerClient {
     /// 拉一页弹幕
+    ///
+    /// cursor 是服务端返回的 JSON 串，里面含 `{` `"` `:` 等字符。
+    /// 不能用 addingPercentEncoding 后再拼进路径 —— absolute() 会再走
+    /// URL(string:)，百分号会被二次编码成 %25，服务端收到坏 cursor。
+    /// 这里改用 URLComponents 组装，只编码一次。
     func danmaku(vid: String, seriesID: String, cursor: String = "",
                  offsetMs: Int = 0) async throws -> HGDmakuPage {
-        var path = "/api/danmaku?vid=\(vid)&series_id=\(seriesID)"
-        if !cursor.isEmpty {
-            let escaped = cursor.addingPercentEncoding(
-                withAllowedCharacters: .alphanumerics) ?? ""
-            path += "&cursor=\(escaped)"
-        }
-        if offsetMs > 0 { path += "&offset_ms=\(offsetMs)" }
+        guard let base = config.normalized else { throw HGServeError.notConfigured }
 
-        guard let url = absolute(path) else { throw HGServeError.notConfigured }
+        var baseStr = base.absoluteString
+        while baseStr.hasSuffix("/") { baseStr.removeLast() }
+
+        guard var comps = URLComponents(string: baseStr + "/api/danmaku") else {
+            throw HGServeError.badPath("/api/danmaku")
+        }
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "vid", value: vid),
+            URLQueryItem(name: "series_id", value: seriesID),
+        ]
+        if !cursor.isEmpty {
+            items.append(URLQueryItem(name: "cursor", value: cursor))
+        }
+        if offsetMs > 0 {
+            items.append(URLQueryItem(name: "offset_ms", value: String(offsetMs)))
+        }
+        if !config.token.isEmpty {
+            items.append(URLQueryItem(name: "token", value: config.token))
+        }
+        comps.queryItems = items
+
+        guard let url = comps.url else { throw HGServeError.badPath("/api/danmaku") }
+
         var req = URLRequest(url: url)
         req.timeoutInterval = 30
         req.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -59,7 +80,9 @@ extension HGServerClient {
         }
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw HGServeError.http((resp as? HTTPURLResponse)?.statusCode ?? -1, "弹幕请求失败")
+            let msg = String(data: data, encoding: .utf8) ?? ""
+            throw HGServeError.http((resp as? HTTPURLResponse)?.statusCode ?? -1,
+                                    String(msg.prefix(160)))
         }
         return try JSONDecoder().decode(HGDmakuPage.self, from: data)
     }
@@ -109,23 +132,24 @@ final class DanmakuEngine: ObservableObject {
             return
         }
 
-        // 屏幕上前 8 秒内仍应可见的弹幕
-        let window = 8.0
-        let from = currentTime - 0.3
-        let to = currentTime + 0.3
+        let window = 8.0   // 一条弹幕飞过屏幕所需秒数
 
         var next: [ActiveDanmaku] = []
 
-        // 已经在屏上的：保留（用 startSec 判断还没飞完）
+        // 1) 已经在屏上的：只要还没飞完就保留
         for d in active where currentTime < d.startSec + d.duration {
             next.append(d)
         }
 
-        // 新进入时间窗的
+        // 2) 补上「已经开始但还没上屏」的弹幕。
+        //    不能只用 ±0.3s 的窄窗口 —— 时间观察器是 0.4s 间隔，
+        //    窗口太窄会漏掉大部分弹幕。
+        //    正确条件：起始时间在 (currentTime - window, currentTime] 之间。
+        let lower = currentTime - window
         for item in all {
             let t = item.offsetSec
-            if t < from { continue }
-            if t > to { break }
+            if t > currentTime { break }        // 还没到
+            if t <= lower { continue }          // 已经飞过去了
             if next.contains(where: { $0.id == item.id }) { continue }
 
             // 找空闲轨道
