@@ -47,7 +47,7 @@ const WEB_UA =
 const SEG_SIZE = 32 * 1024 * 1024;
 
 // 版本号：解密/头部处理逻辑有改动就 +1
-const SERVER_VERSION = "11";
+const SERVER_VERSION = "12";
 
 // ---------------------------------------------------------------- 工具
 
@@ -625,23 +625,54 @@ async function resolveStream(vid) {
     if (seed.length && url) url = decryptSpadeUrl(url, seed);
     const key = selected.item.spade_a ? deriveContentKey(selected.item.spade_a) : null;
 
-    // 拉头部建 CENC 索引
+    // 拉头部建 CENC 索引。
+    // 注意：不能直接 readBox(head, ftypSize) —— 它要求整个 box 都在 head 里，
+    // 而 moov 可能有 300KB+，超出首次拉取窗口就会返回 null，
+    // 导致 encrypted 误判为 false（这类视频直连必失败）。
+    // 正确做法：先读 box 头拿到 size，再按需补齐。
     const first = await remoteRange(url, 0, 256 * 1024 - 1);
-    const head = first.data;
+    let head = first.data;
     const total = first.total || head.length;
-    const moov = readBox(head, head.readUInt32BE(0));
+
     let prepared = null;
     let encrypted = false;
-    if (moov && moov.type === "moov") {
-      const moovEnd = moov.offset + moov.size;
-      let headerBuf = head;
-      if (moovEnd > head.length) {
-        const rest = await remoteRange(url, head.length, moovEnd - 1);
-        headerBuf = Buffer.concat([head.subarray(0, head.length), rest.data]);
+
+    // 1) 读 ftyp 长度，定位 moov 起点
+    const ftypSize = head.length >= 8 ? head.readUInt32BE(0) : 0;
+    const moovOff = ftypSize > 0 && ftypSize + 8 <= head.length ? ftypSize : -1;
+    const moovType = moovOff >= 0 ? head.toString("ascii", moovOff + 4, moovOff + 8) : "";
+
+    if (moovOff >= 0 && moovType === "moov") {
+      // 2) 读 moov 大小（可能超过首次窗口）
+      let moovSize = head.readUInt32BE(moovOff);
+      let moovHdr = 8;
+      if (moovSize === 1 && moovOff + 16 <= head.length) {
+        const large = head.readBigUInt64BE(moovOff + 8);
+        if (large <= BigInt(Number.MAX_SAFE_INTEGER)) {
+          moovSize = Number(large);
+          moovHdr = 16;
+        }
       }
-      headerBuf = headerBuf.subarray(0, moovEnd);
-      encrypted = headerBuf.indexOf(Buffer.from("encv")) >= 0 || headerBuf.indexOf(Buffer.from("enca")) >= 0;
-      prepared = prepareCencHeader(headerBuf, encrypted ? key : null);
+      const moovEnd = moovOff + moovSize;
+
+      // 3) 不足就补齐（上限 8MB，防止异常文件）
+      if (moovEnd > head.length && moovEnd <= 8 * 1024 * 1024 && moovEnd <= total) {
+        const rest = await remoteRange(url, head.length, moovEnd - 1);
+        head = Buffer.concat([head, rest.data]);
+      }
+
+      if (moovEnd <= head.length) {
+        const headerBuf = head.subarray(0, moovEnd);
+        encrypted = headerBuf.indexOf(Buffer.from("encv")) >= 0
+          || headerBuf.indexOf(Buffer.from("enca")) >= 0;
+        prepared = prepareCencHeader(headerBuf, encrypted ? key : null);
+      } else {
+        console.error("[cenc] moov 超出可拉取范围 vid=%s moovEnd=%d head=%d",
+          vid, moovEnd, head.length);
+      }
+    } else {
+      console.error("[cenc] 找不到 moov vid=%s ftypSize=%d moovOff=%d type=%s",
+        vid, ftypSize, moovOff, moovType);
     }
 
     const value = {

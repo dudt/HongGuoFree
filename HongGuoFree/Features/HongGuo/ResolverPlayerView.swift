@@ -994,7 +994,25 @@ final class PlayerController: ObservableObject {
                     bundle: HGKeyBundle,
                     startAt: Double = 0,
                     rate: Float = 1.0) async {
-        // 整集下载 + 解密到本地文件（有进度）
+
+        // 情况 A：未加密（encrypted=false，没有 header/samples）
+        // 直接播 CDN 地址即可，不需要下载和解密。
+        // 早期版本这里直接 return nil 导致这类视频直连必失败。
+        let isEncrypted = bundle.encrypted ?? true
+        let hasDecryptInfo = (bundle.headerB64?.isEmpty == false)
+            && (bundle.samples != nil)
+
+        if !isEncrypted || !hasDecryptInfo {
+            guard let cdn = bundle.cdnURL, let u = URL(string: cdn) else {
+                onDirectFailed?("CDN 地址无效")
+                return
+            }
+            onPrepareProgress?(1.0, "")
+            load(url: u, startAt: startAt, rate: rate)
+            return
+        }
+
+        // 情况 B：已加密 → 整集下载 + 解密到本地文件（有进度）
         let fileURL: URL
         do {
             fileURL = try await cache.prepare(vid: vid, bundle: bundle) { p in
@@ -1007,8 +1025,7 @@ final class PlayerController: ObservableObject {
             return
         }
 
-        // 直接播本地文件。AVPlayer 对 file:// 支持最完善，
-        // 不需要本地 HTTP 服务（之前那套是多余的复杂度）。
+        // AVPlayer 播 file:// 最可靠，不需要本地 HTTP 服务
         onPrepareProgress?(1.0, "")
         load(url: fileURL, startAt: startAt, rate: rate)
     }
