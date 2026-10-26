@@ -6,6 +6,8 @@ on:
     paths-ignore:
       - '**.md'
       - 'docs/**'
+    tags:
+      - 'v*'
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
@@ -32,9 +34,14 @@ on:
         description: '构建号（留空用 run number）'
         required: false
         default: ''
+      publish_release:
+        description: '构建完成后发布到 Releases'
+        required: false
+        default: true
+        type: boolean
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -53,6 +60,11 @@ jobs:
       MARKETING_VERSION: ${{ inputs.marketing_version || '1.0.0' }}
       BUILD_NUMBER: ${{ inputs.build_number || github.run_number }}
       HAS_SIGNING: ${{ secrets.BUILD_CERTIFICATE_BASE64 != '' && secrets.PROVISIONING_PROFILE_BASE64 != '' }}
+      # 是否发布到 Releases：
+      #   push tag v*        -> 是
+      #   手动触发          -> 看 publish_release
+      #   push 分支 / PR    -> 否
+      SHOULD_RELEASE: ${{ (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)) && 'true' || 'false' }}
 
     steps:
       - name: Checkout
@@ -218,6 +230,102 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      # ---------- 发布到 GitHub Releases ----------
+
+      - name: Prepare release metadata
+        if: env.SHOULD_RELEASE == 'true'
+        id: meta
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            TITLE="$TAG"
+          else
+            TAG="v${MARKETING_VERSION}-${BUILD_NUMBER}"
+            TITLE="v${MARKETING_VERSION} (${BUILD_NUMBER})"
+          fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "RELEASE_TITLE=$TITLE" >> "$GITHUB_ENV"
+          echo "release tag: $TAG"
+
+      - name: Collect release assets
+        if: env.SHOULD_RELEASE == 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p build/release
+          cp build/unsigned/*.ipa build/release/ || true
+          if [ -d build/signed ] && ls build/signed/*.ipa >/dev/null 2>&1; then
+            cp build/signed/*.ipa build/release/ || true
+          fi
+          # 附带安装说明
+          cat > build/release/INSTALL.txt <<'EOF'
+          红果免广告 · iOS 安装说明
+          ================================
+
+          本包未签名，需自行签名后安装。
+
+          方式一：Sideloadly（Windows / macOS）
+            1. 下载 Sideloadly
+            2. 连上 iPhone，把 ipa 拖进去
+            3. 填入 Apple ID，点 Start
+            4. 手机「设置 → 通用 → VPN与设备管理」信任开发者
+
+          方式二：AltStore
+            1. 电脑装 AltStore，手机装 AltStore App
+            2. 用 AltStore 打开 ipa 安装
+            3. 每 7 天需要在 AltStore 里刷新一次
+
+          方式三：爱思助手（Windows）
+            工具箱 → IPA 签名 → 导入 ipa → 签名后安装
+
+          首次启动后
+            1. 打开「我的 → 解析服务」
+            2. 填入你的服务器地址（如 http://192.168.1.10:8787）
+            3. 点「测试连接」，显示「连接正常」即可
+            4. 回首页下拉刷新，开始看剧
+
+          自建解析服务
+            node server/hongguo-server.mjs
+            详见仓库 server/README.md
+          EOF
+          ls -lh build/release
+
+      - name: Publish to Releases
+        if: env.SHOULD_RELEASE == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: ${{ env.RELEASE_TITLE }}
+          files: build/release/*
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          body: |
+            ## 红果免广告 ${{ env.TAG }}
+
+            **未签名 IPA**，需用 Sideloadly / AltStore / 爱思助手自签安装。
+
+            ### 这个版本包含
+            - 真实红果剧库（推荐 / 热播 / 榜单 / 新剧，支持下拉瀑布流）
+            - 全集 1080P 直连播放（服务端解密 CENC）
+            - 弹幕（真实红果弹幕，可调位置/字号/速度/透明度）
+            - 观看历史 + 续播 + 收藏
+            - 播放器：双击跳转、横向拖进度、纵向调亮度/音量、长按 2 倍速
+
+            ### 安装前需要
+            自建解析服务（仓库 `server/` 目录）：
+            ```bash
+            node server/hongguo-server.mjs
+            ```
+            装好后在「我的 → 解析服务」填服务器地址。
+
+            ### 构建信息
+            - Bundle ID: `${{ env.BUNDLE_ID }}`
+            - 版本: `${{ env.MARKETING_VERSION }} (${{ env.BUILD_NUMBER }})`
+            - 签名状态: ${{ env.HAS_SIGNING == 'true' && '已签名' || '未签名' }}
+
+            ---
+            仅供个人学习与技术研究，内容版权归原权利人所有。
+
       - name: Summary
         if: always()
         run: |
@@ -234,4 +342,16 @@ jobs:
             fi
             echo ""
             echo "在本次运行页面底部的 **Artifacts** 区域下载。"
+            if [ "$SHOULD_RELEASE" = "true" ]; then
+              echo ""
+              echo "### 已发布到 Releases"
+              echo ""
+              echo "标签 \`$TAG\` — https://github.com/${GITHUB_REPOSITORY}/releases/tag/$TAG"
+              echo ""
+              echo "用户可直接从 Releases 页面下载 ipa。"
+            else
+              echo ""
+              echo "> 本次未发布到 Releases（分支推送 / PR）。"
+              echo "> 发布方式：推送 \`v*\` 标签，或在手动触发时勾选 \`publish_release\`。"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
