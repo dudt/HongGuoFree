@@ -1,17 +1,24 @@
 // 本地 HTTP 流服务
 //
-// 为什么不再用 AVAssetResourceLoader：
-//   自定义 scheme + resourceLoader 在 MP4 渐进式播放上非常脆弱，
-//   AVPlayer 内部会做大量 Range 探测，稍有偏差就整段放弃并报
-//   「操作已停止」。这条路反复调不通。
+// 设计要点（都是踩过的坑）：
 //
-// 现在的做法：在 App 内起一个只监听 127.0.0.1 的 HTTP 服务，
-//   AVPlayer 连 http://127.0.0.1:PORT/stream.mp4，
-//   服务端按 Range 去 CDN 拉密文 → 本地解密 → 返回明文。
+// 1. 为什么不用 AVAssetResourceLoader
+//    自定义 scheme 下 AVPlayer 的 Range 探测极其挑剔，稍有偏差就整段
+//    放弃并报「操作已停止」。走本地 HTTP 是它最熟悉的路。
 //
-//   AVPlayer 走的是它最熟悉的原生 HTTP 栈，Range/HEAD/keep-alive
-//   全部按标准行为处理，不存在私有 API 的坑。
-//   带宽依旧不经过自建服务器（只有几十 KB 的密钥包）。
+// 2. 每个连接只处理一个请求，响应后关闭
+//    流水线/keep-alive 在自研服务里很容易乱序，AVPlayer 会等超时。
+//    它自己会重连，代价可接受，换来的是确定性。
+//
+// 3. 拉取失败返回 503，绝不补零
+//    早期版本 CDN 失败时用 Data(count:) 补零，结果 AVPlayer 拿到
+//    全零样本，解码失败后报「未知错误」。返回 503 它会自己重试。
+//
+// 4. HEAD 带 Range 时返回 206
+//    AVPlayer 会用 HEAD+Range 探测是否支持断点，回 200 会让它误判。
+//
+// 5. 请求日志
+//    暴露 /debug 端点，真机出问题时可以直接看服务收到了什么。
 import Foundation
 import Network
 
@@ -33,7 +40,6 @@ final class LocalStreamServer: @unchecked Sendable {
     private let cdnURL: URL
     private let session: URLSession
 
-    /// 并发处理多个连接；每个连接内部按需阻塞等 CDN
     private let queue = DispatchQueue(label: "hg.localstream",
                                       qos: .userInitiated,
                                       attributes: .concurrent)
@@ -42,12 +48,11 @@ final class LocalStreamServer: @unchecked Sendable {
     private var listener: NWListener?
     private var blocks: [Int64: Data] = [:]
     private var blockOrder: [Int64] = []
+    private(set) var logLines: [String] = []
 
-    /// 缓存块大小（AVPlayer 会反复请求相近区间）
-    private let blockSize: Int64 = 128 * 1024
-    /// 单次响应上限，避免一次吐太多
-    private let maxResponse: Int64 = 4 * 1024 * 1024
-    private let maxCachedBlocks = 120
+    private let blockSize: Int64 = 256 * 1024
+    private let maxResponse: Int64 = 8 * 1024 * 1024
+    private let maxCachedBlocks = 80
 
     private let ua = "com.phoenix.read/74232 (Linux; U; Android 16; zh_CN; "
         + "25053RT47C; Build/BP2A.250605.031.A3)"
@@ -63,19 +68,27 @@ final class LocalStreamServer: @unchecked Sendable {
         self.session = URLSession(configuration: cfg)
     }
 
+    // MARK: 日志
+
+    private func log(_ s: String) {
+        stateQueue.sync {
+            logLines.append(s)
+            if logLines.count > 80 { logLines.removeFirst(logLines.count - 80) }
+        }
+    }
+
+    func recentLog() -> [String] {
+        stateQueue.sync { logLines }
+    }
+
     // MARK: 启停
 
-    /// 启动并返回实际端口
     func start() async throws -> UInt16 {
-        let params = NWParameters.tcp
-        params.allowLocalEndpointReuse = true
-        // 只绑回环，避免局域网可访问 + 触发本地网络权限弹窗
-        params.requiredLocalEndpoint = NWEndpoint.hostPort(
-            host: .ipv4(.loopback), port: .any)
-
+        // 不设 requiredLocalEndpoint：那套 API 在部分 iOS 版本上
+        // 会让 listener 一直停在 .setup。直接不指定端口让它自己分配。
         let l: NWListener
         do {
-            l = try NWListener(using: params)
+            l = try NWListener(using: .tcp)
         } catch {
             throw ServerError.listenFailed(error.localizedDescription)
         }
@@ -103,13 +116,13 @@ final class LocalStreamServer: @unchecked Sendable {
             }
             l.start(queue: self.queue)
 
-            // 3 秒兜底
-            self.queue.asyncAfter(deadline: .now() + 3) {
+            self.queue.asyncAfter(deadline: .now() + 4) {
                 guard once.claim() else { return }
                 cont.resume(throwing: ServerError.timeout)
             }
         }
         self.listener = l
+        log("listen :\(port)  total=\(decryptor.totalSize)")
         return port
     }
 
@@ -122,15 +135,15 @@ final class LocalStreamServer: @unchecked Sendable {
         }
     }
 
-    // MARK: 连接处理
+    // MARK: 连接
 
     private func handle(_ conn: NWConnection) {
         conn.start(queue: queue)
-        readRequest(conn, buffer: Data())
+        receive(conn, buffer: Data())
     }
 
-    private func readRequest(_ conn: NWConnection, buffer: Data) {
-        conn.receive(minimumIncompleteLength: 1, maximumLength: 32 * 1024) {
+    private func receive(_ conn: NWConnection, buffer: Data) {
+        conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) {
             [weak self] data, _, isComplete, error in
             guard let self else { conn.cancel(); return }
             var buf = buffer
@@ -141,11 +154,11 @@ final class LocalStreamServer: @unchecked Sendable {
                 self.respond(conn, head: head)
                 return
             }
-            if error != nil || isComplete || buf.count > 32 * 1024 {
+            if error != nil || isComplete || buf.count > 65536 {
                 conn.cancel()
                 return
             }
-            self.readRequest(conn, buffer: buf)
+            self.receive(conn, buffer: buf)
         }
     }
 
@@ -155,12 +168,25 @@ final class LocalStreamServer: @unchecked Sendable {
         guard let reqLine = lines.first else { conn.cancel(); return }
         let parts = reqLine.split(separator: " ")
         guard parts.count >= 2 else { conn.cancel(); return }
+
         let method = String(parts[0]).uppercased()
+        let path = String(parts[1])
+
+        // /debug：返回服务状态
+        if path.hasPrefix("/debug") {
+            let body = Data(recentLog().joined(separator: "\n").utf8)
+            var h = "HTTP/1.1 200 OK\r\n"
+            h += "Content-Type: text/plain; charset=utf-8\r\n"
+            h += "Content-Length: \(body.count)\r\n"
+            h += "Connection: close\r\n\r\n"
+            var p = Data(h.utf8); p.append(body)
+            sendAndClose(conn, p)
+            return
+        }
 
         var start: Int64 = 0
         var end: Int64 = -1
         var hasRange = false
-        var wantsClose = false
 
         for l in lines.dropFirst() {
             let low = l.lowercased()
@@ -176,60 +202,72 @@ final class LocalStreamServer: @unchecked Sendable {
                         if let e = Int64(comps[1]) { end = e }
                     }
                 }
-            } else if low.hasPrefix("connection:") {
-                if low.contains("close") { wantsClose = true }
             }
         }
 
         let total = decryptor.totalSize
         guard total > 0 else { conn.cancel(); return }
 
-        if !hasRange { start = 0; end = total - 1 }
-        if end < 0 || end >= total { end = total - 1 }
+        if !hasRange {
+            start = 0
+            end = total - 1
+        } else if end < 0 || end >= total {
+            end = total - 1
+        }
         if start < 0 { start = 0 }
         if start > end { conn.cancel(); return }
         if end - start + 1 > maxResponse { end = start + maxResponse - 1 }
 
+        log("\(method) \(hasRange ? "\(start)-\(end)" : "full")")
+
         // HEAD：只回头
         if method == "HEAD" {
-            let h = "HTTP/1.1 200 OK\r\n"
-                + "Content-Type: video/mp4\r\n"
-                + "Content-Length: \(total)\r\n"
-                + "Accept-Ranges: bytes\r\n"
-                + "Connection: \(wantsClose ? "close" : "keep-alive")\r\n\r\n"
-            send(conn, Data(h.utf8), close: wantsClose)
+            let status = hasRange ? "206 Partial Content" : "200 OK"
+            var h = "HTTP/1.1 \(status)\r\n"
+            h += "Content-Type: video/mp4\r\n"
+            h += "Content-Length: \(end - start + 1)\r\n"
+            h += "Accept-Ranges: bytes\r\n"
+            if hasRange {
+                h += "Content-Range: bytes \(start)-\(end)/\(total)\r\n"
+            }
+            h += "Connection: close\r\n\r\n"
+            sendAndClose(conn, Data(h.utf8))
             return
         }
 
-        // GET：拼数据
-        let body = assemble(from: start, to: end)
+        // GET：拼数据。任何一块拉失败就回 503，让 AVPlayer 重试。
+        guard let body = assemble(from: start, to: end) else {
+            log("503 \(start)-\(end) 拉取失败")
+            let h = "HTTP/1.1 503 Service Unavailable\r\n"
+                + "Content-Length: 0\r\n"
+                + "Retry-After: 1\r\n"
+                + "Connection: close\r\n\r\n"
+            sendAndClose(conn, Data(h.utf8))
+            return
+        }
+
         var h = "HTTP/1.1 206 Partial Content\r\n"
         h += "Content-Type: video/mp4\r\n"
         h += "Content-Length: \(body.count)\r\n"
         h += "Content-Range: bytes \(start)-\(end)/\(total)\r\n"
         h += "Accept-Ranges: bytes\r\n"
-        h += "Connection: \(wantsClose ? "close" : "keep-alive")\r\n\r\n"
+        h += "Connection: close\r\n\r\n"
 
         var packet = Data(h.utf8)
         packet.append(body)
-        send(conn, packet, close: wantsClose)
+        sendAndClose(conn, packet)
     }
 
-    private func send(_ conn: NWConnection, _ data: Data, close: Bool) {
-        conn.send(content: data, completion: .contentProcessed { [weak self] err in
-            guard let self else { return }
-            if err != nil || close {
-                conn.cancel()
-                return
-            }
-            // keep-alive：继续读下一个请求
-            self.readRequest(conn, buffer: Data())
+    private func sendAndClose(_ conn: NWConnection, _ data: Data) {
+        conn.send(content: data, completion: .contentProcessed { _ in
+            conn.cancel()
         })
     }
 
     // MARK: 数据组装
 
-    private func assemble(from start: Int64, to end: Int64) -> Data {
+    /// 返回 nil 表示有块拉取失败（不要补零）
+    private func assemble(from start: Int64, to end: Int64) -> Data? {
         let need = Int(end - start + 1)
         var out = Data()
         out.reserveCapacity(need)
@@ -238,7 +276,7 @@ final class LocalStreamServer: @unchecked Sendable {
         let lastBlock = end / blockSize
         var b = firstBlock
         while b <= lastBlock {
-            guard let block = blockData(b) else { break }
+            guard let block = blockData(b) else { return nil }
             let bStart = b * blockSize
             let bEnd = bStart + Int64(block.count) - 1
             let f = max(bStart, start)
@@ -252,7 +290,7 @@ final class LocalStreamServer: @unchecked Sendable {
             }
             b += 1
         }
-        if out.count < need { out.append(Data(count: need - out.count)) }
+        guard out.count == need else { return nil }
         return out
     }
 
@@ -268,8 +306,11 @@ final class LocalStreamServer: @unchecked Sendable {
 
         var cipher = Data()
         if bEnd >= cdnStart {
-            cipher = fetchCDN(from: cdnStart, to: bEnd)
-                ?? Data(count: Int(bEnd - cdnStart + 1))
+            guard let fetched = fetchCDN(from: cdnStart, to: bEnd) else {
+                log("CDN 失败 \(cdnStart)-\(bEnd)")
+                return nil
+            }
+            cipher = fetched
         }
 
         let plain = decryptor.produce(cipher: cipher,
@@ -288,10 +329,10 @@ final class LocalStreamServer: @unchecked Sendable {
         return plain
     }
 
-    /// 同步拉一段 CDN 密文（连接队列是并发的，阻塞可接受）
     private func fetchCDN(from: Int64, to: Int64) -> Data? {
         let sem = DispatchSemaphore(value: 0)
         var result: Data?
+        var code = 0
 
         var req = URLRequest(url: cdnURL)
         req.setValue("bytes=\(from)-\(to)", forHTTPHeaderField: "Range")
@@ -301,16 +342,31 @@ final class LocalStreamServer: @unchecked Sendable {
 
         let task = session.dataTask(with: req) { data, resp, _ in
             defer { sem.signal() }
-            guard let data, !data.isEmpty else { return }
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            // 200/206 都接受；206 时若起始不符则放弃（避免错位）
-            if code == 206 || code == 200 {
-                result = data
-            }
+            code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if let d = data, !d.isEmpty { result = d }
         }
         task.resume()
         _ = sem.wait(timeout: .now() + 28)
-        return result
+
+        guard let d = result else {
+            log("CDN 空响应 code=\(code)")
+            return nil
+        }
+        // 206 才是精确区间；200 表示服务器忽略了 Range，整段返回
+        if code == 206 {
+            let want = Int(to - from + 1)
+            if d.count < want { return nil }
+            return d.prefix(want)
+        }
+        if code == 200 {
+            // 整文件返回：切出需要的段
+            let s = Int(from)
+            let e = Int(min(to + 1, Int64(d.count)))
+            guard s < e, e <= d.count else { return nil }
+            return d.subdata(in: s..<e)
+        }
+        log("CDN code=\(code)")
+        return nil
     }
 }
 

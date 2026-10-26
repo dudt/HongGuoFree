@@ -75,6 +75,8 @@ struct ResolverPlayerView: View {
     @State private var currentVariant: HGVariant?
     @State private var loading = false
     @State private var errorText: String?
+    @State private var directError: String?
+    @State private var isDirectPlaying = false
 
     // 播放
     @State private var controller = PlayerController()
@@ -526,20 +528,61 @@ struct ResolverPlayerView: View {
     // MARK: - 错误
 
     private func errorOverlay(_ msg: String) -> some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 26)).foregroundStyle(.orange)
+                .font(.system(size: 24)).foregroundStyle(.orange)
             Text(msg)
-                .font(.system(size: 13)).foregroundStyle(.white.opacity(0.9))
-                .multilineTextAlignment(.center).padding(.horizontal, 32)
-            Button("重试") { Task { await loadDetail() } }
-                .font(.system(size: 13, weight: .semibold))
-                .padding(.horizontal, 18).padding(.vertical, 8)
-                .background(Palette.accent).foregroundStyle(.white)
+                .font(.system(size: 12)).foregroundStyle(.white.opacity(0.9))
+                .multilineTextAlignment(.center).padding(.horizontal, 24)
+
+            if let de = directError {
+                Text("直连：\(de)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.orange.opacity(0.85))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+            }
+
+            // 本地流服务日志（真机诊断用）
+            let logs = controller.directLog()
+            if !logs.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 1) {
+                        ForEach(Array(logs.suffix(14).enumerated()), id: \.offset) { _, l in
+                            Text(l)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.65))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(6)
+                }
+                .frame(maxHeight: 110)
+                .background(.black.opacity(0.55))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .padding(.horizontal, 16)
+            }
+
+            HStack(spacing: 10) {
+                Button("重试") { Task { await loadDetail() } }
+                    .font(.system(size: 12, weight: .semibold))
+                    .padding(.horizontal, 16).padding(.vertical, 7)
+                    .background(Palette.accent).foregroundStyle(.white)
+                    .clipShape(Capsule()).buttonStyle(.plain)
+
+                Button("改用转发") {
+                    settings.directMode = false
+                    Task { await loadDetail() }
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 14).padding(.vertical, 7)
+                .background(.white.opacity(0.18)).foregroundStyle(.white)
                 .clipShape(Capsule()).buttonStyle(.plain)
+            }
         }
-        .padding(20).background(.black.opacity(0.75))
+        .padding(18).background(.black.opacity(0.82))
         .clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 20)
     }
 
     // MARK: - 弹层
@@ -716,7 +759,18 @@ struct ResolverPlayerView: View {
             }
             controller.onBuffer = { bufferedEnd = $0 }
             controller.onEnd = { Task { await playNext() } }
-            controller.onFail = { errorText = $0 }
+            controller.onFail = { msg in
+                // 直连失败 → 自动回退转发模式，用户无感
+                if isDirectPlaying {
+                    isDirectPlaying = false
+                    directError = msg
+                    if let u = try? client.streamURL(vid: ep.vid) {
+                        controller.load(url: u, startAt: progress, rate: rate)
+                        return
+                    }
+                }
+                errorText = msg
+            }
             controller.onState = { playing in
                 isPlaying = playing
             }
@@ -728,16 +782,20 @@ struct ResolverPlayerView: View {
                 resume = pos
             }
 
+            // 先决定用哪种模式；直连失败会在 onDirectFailed 里回退
+            isDirectPlaying = false
             if settings.directMode {
-                // 直连：只取密钥，视频走 CDN
-                if let bundle = try? await client.keys(vid: ep.vid) {
-                    await controller.loadDirect(bundle: bundle, startAt: resume, rate: rate)
-                } else {
-                    // 回退到转发
-                    let url = try client.streamURL(vid: ep.vid)
-                    controller.load(url: url, startAt: resume, rate: rate)
+                do {
+                    let bundle = try await client.keys(vid: ep.vid)
+                    isDirectPlaying = true
+                    await controller.loadDirect(bundle: bundle,
+                                                startAt: resume, rate: rate)
+                } catch {
+                    directError = error.localizedDescription
+                    isDirectPlaying = false
                 }
-            } else {
+            }
+            if !isDirectPlaying {
                 let url = try client.streamURL(vid: ep.vid)
                 controller.load(url: url, startAt: resume, rate: rate)
             }
@@ -894,12 +952,14 @@ final class PlayerController: ObservableObject {
 
     /// 直连模式：本地起 HTTP 服务，AVPlayer 走标准 http://127.0.0.1
     private var localServer: LocalStreamServer?
+    /// 直连失败时回调，让上层回退到转发模式
+    var onDirectFailed: ((String) -> Void)?
 
     func loadDirect(bundle: HGKeyBundle, startAt: Double = 0,
                     rate: Float = 1.0) async {
         guard let decryptor = CENCDecryptor(bundle: bundle),
               let cdn = bundle.cdnURL, let cdnURL = URL(string: cdn) else {
-            onFail?("直连解密初始化失败")
+            onDirectFailed?("解密参数无效（key/header/samples 缺失）")
             return
         }
 
@@ -909,13 +969,17 @@ final class PlayerController: ObservableObject {
             let port = try await server.start()
             localServer = server
             guard let url = URL(string: "http://127.0.0.1:\(port)/stream.mp4") else {
-                onFail?("本地流地址无效")
+                onDirectFailed?("本地流地址无效")
                 return
             }
             load(url: url, startAt: startAt, rate: rate)
         } catch {
-            onFail?("本地流服务启动失败：\(error.localizedDescription)")
+            onDirectFailed?("本地服务启动失败：\(error.localizedDescription)")
         }
+    }
+
+    func directLog() -> [String] {
+        localServer?.recentLog() ?? []
     }
 
     private func stopLocalServer() {
