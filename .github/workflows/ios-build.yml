@@ -61,10 +61,11 @@ jobs:
       BUILD_NUMBER: ${{ inputs.build_number || github.run_number }}
       HAS_SIGNING: ${{ secrets.BUILD_CERTIFICATE_BASE64 != '' && secrets.PROVISIONING_PROFILE_BASE64 != '' }}
       # 是否发布到 Releases：
-      #   push tag v*        -> 是
-      #   手动触发          -> 看 publish_release
-      #   push 分支 / PR    -> 否
-      SHOULD_RELEASE: ${{ (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish_release)) && 'true' || 'false' }}
+      #   push tag v*        -> 是（tag 即版本号）
+      #   push master/main   -> 是（自动递增 build tag）
+      #   PR                 -> 否
+      #   手动触发           -> 看 publish_release（默认是）
+      SHOULD_RELEASE: ${{ ((github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')) || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true)) && 'true' || 'false' }}
 
     steps:
       - name: Checkout
@@ -235,18 +236,35 @@ jobs:
       - name: Prepare release metadata
         if: env.SHOULD_RELEASE == 'true'
         id: meta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            # tag 推送：直接用 tag 名
             TAG="${GITHUB_REF#refs/tags/}"
             TITLE="$TAG"
           else
-            TAG="v${MARKETING_VERSION}-${BUILD_NUMBER}"
-            TITLE="v${MARKETING_VERSION} (${BUILD_NUMBER})"
+            # 分支推送：自动找下一个可用的 v{版本}-build{N}
+            BASE="v${MARKETING_VERSION}"
+            N="$BUILD_NUMBER"
+            TAG="${BASE}-build${N}"
+            # 避免重名（重跑同一 run 时 tag 可能已存在）
+            MAX=20
+            while gh release view "$TAG" >/dev/null 2>&1; do
+              N=$((N + 1))
+              TAG="${BASE}-build${N}"
+              MAX=$((MAX - 1))
+              if [ "$MAX" -le 0 ]; then
+                TAG="${BASE}-build${N}-${GITHUB_RUN_ATTEMPT}"
+                break
+              fi
+            done
+            TITLE="v${MARKETING_VERSION} · build ${N}"
           fi
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "RELEASE_TITLE=$TITLE" >> "$GITHUB_ENV"
-          echo "release tag: $TAG"
+          echo "release tag: $TAG  title: $TITLE"
 
       - name: Collect release assets
         if: env.SHOULD_RELEASE == 'true'
