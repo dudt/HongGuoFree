@@ -57,6 +57,12 @@ struct ResolverPlayerView: View {
     @State private var currentVariant: HGVariant?
     @State private var showQuality = false
 
+    // 弹幕
+    @StateObject private var danmaku = DanmakuEngine()
+    @State private var dmCursor = ""
+    @State private var dmLoading = false
+    @State private var dmTotal = 0
+
     // 观察器
     @State private var timeObserver: Any?
     @State private var statusObs: NSKeyValueObservation?
@@ -71,6 +77,12 @@ struct ResolverPlayerView: View {
 
             if let player {
                 VideoSurface(player: player).ignoresSafeArea()
+            }
+
+            // 弹幕层（在视频之上、控制层之下）
+            if danmaku.isEnabled, !danmaku.active.isEmpty {
+                DanmakuOverlay(engine: danmaku, currentTime: progress)
+                    .ignoresSafeArea()
             }
 
             if controlsVisible {
@@ -128,6 +140,25 @@ struct ResolverPlayerView: View {
                     }
                 }
                 Spacer()
+
+                // 弹幕开关
+                Button {
+                    danmaku.isEnabled.toggle()
+                    log("弹幕 \(danmaku.isEnabled ? "开" : "关")")
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: danmaku.isEnabled
+                              ? "text.bubble.fill" : "text.bubble")
+                        Text(danmaku.isEnabled ? "弹幕开" : "弹幕关")
+                    }
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(danmaku.isEnabled ? .white : .white.opacity(0.5))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 7)
+                    .background(.black.opacity(0.45))
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
 
                 if !variants.isEmpty {
                     Button { showQuality = true } label: {
@@ -424,6 +455,12 @@ struct ResolverPlayerView: View {
             p.play()
             isPlaying = true
             scheduleHideControls()
+
+            // 弹幕：换集时清空并重新拉
+            danmaku.clear()
+            dmCursor = ""
+            dmTotal = 0
+            Task { await loadDanmaku(for: ep, reset: true) }
         } catch {
             errorText = error.localizedDescription
             log("ERR \(error.localizedDescription)")
@@ -444,6 +481,40 @@ struct ResolverPlayerView: View {
             log("质量=\(label) (\(p.totalBytes ?? 0) 字节)")
         } catch {
             variants = []
+        }
+    }
+
+    /// 拉弹幕。首次拉第一页，之后按 cursor 继续。
+    private func loadDanmaku(for ep: HGServerEpisode, reset: Bool = false) async {
+        guard !dmLoading else { return }
+        dmLoading = true
+        defer { dmLoading = false }
+
+        do {
+            var page = try await client.danmaku(
+                vid: ep.vid, seriesID: seriesID, cursor: reset ? "" : dmCursor
+            )
+            var collected = page.items ?? []
+
+            // 自动翻几页，凑够一集主要时段的弹幕
+            var guardCount = 0
+            while page.hasMore == true, let next = page.nextCursor, !next.isEmpty,
+                  guardCount < 4 {
+                guardCount += 1
+                let escaped = next.addingPercentEncoding(
+                    withAllowedCharacters: .alphanumerics) ?? ""
+                page = try await client.danmaku(
+                    vid: ep.vid, seriesID: seriesID, cursor: escaped
+                )
+                collected.append(contentsOf: page.items ?? [])
+            }
+
+            dmCursor = page.nextCursor ?? ""
+            dmTotal = page.total ?? collected.count
+            danmaku.load(collected)
+            log("弹幕 \(collected.count) 条 / 共 \(dmTotal)")
+        } catch {
+            log("弹幕失败 \(error.localizedDescription)")
         }
     }
 
@@ -504,7 +575,10 @@ struct ResolverPlayerView: View {
         ) { t in
             guard !isScrubbing else { return }
             let s = t.seconds
-            if s.isFinite { progress = s }
+            if s.isFinite {
+                progress = s
+                danmaku.tick(currentTime: s)
+            }
             let d = p.currentItem?.duration.seconds ?? 0
             if d.isFinite, d > 0 { duration = d }
         }

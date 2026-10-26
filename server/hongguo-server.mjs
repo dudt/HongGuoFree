@@ -24,6 +24,7 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import { URL } from "node:url";
+import { signHeaders, setSignDevice } from "./sign.mjs";
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -45,7 +46,7 @@ const WEB_UA =
 const SEG_SIZE = 32 * 1024 * 1024;
 
 // 版本号：解密/头部处理逻辑有改动就 +1
-const SERVER_VERSION = "6";
+const SERVER_VERSION = "7";
 
 // ---------------------------------------------------------------- 工具
 
@@ -543,6 +544,7 @@ function decryptPartial(data, start, key, prepared) {
 const streamCache = new Map(); // vid -> { time, value }
 const infoCache = new Map();   // seriesId -> { time, value }
 const discoverCache = new Map(); // tab:offset:count -> { time, value }
+const danmakuCache = new Map();  // vid:cursor:offset -> { time, value }
 const CACHE_TTL = 5 * 60 * 1000;
 
 function qualityNumber(v) {
@@ -636,6 +638,111 @@ async function resolveStream(vid) {
   } finally {
     inflight.delete(vid);
   }
+}
+
+// ---------------------------------------------------------------- 弹幕
+
+/**
+ * 弹幕列表。
+ *
+ * 关键参数（这些是硬门槛，缺一个就 110001）：
+ *   group_id        = 单集 vid
+ *   group_type      = 30        （30 是弹幕专用；1=剧评 会走另一套）
+ *   comment_type    = 20
+ *   comment_source  = 601
+ *   server_channel  = 1000
+ *   business_param.start_offset_time     = 起始毫秒
+ *   business_param.playlet_item_duration = 整集时长（毫秒）
+ *
+ * 响应里 data_list[].comment.expand.offset_time 是弹幕出现时间（毫秒），
+ * common_list_info.cursor 是 JSON 串，原样回传即可翻页。
+ */
+async function fetchDanmaku(vid, seriesId, durationMs, cursor = "", offsetMs = 0) {
+  const dev = freshDevice();
+  const body = JSON.stringify({
+    group_id: String(vid),
+    group_type: 30,
+    comment_type: 20,
+    comment_source: 601,
+    server_channel: 1000,
+    sort: 1,
+    count: 90,
+    cursor: cursor || "",
+    aid: 8662,
+    compliance_status: 0,
+    business_param: {
+      book_id: String(seriesId),
+      start_offset_time: offsetMs,
+      playlet_item_duration: durationMs,
+      need_danmaku_guide_type: [],
+    },
+  });
+
+  // 评论/弹幕接口强制校验签名（multi_video_model 不需要，这两个要）
+  const khronos = Math.floor(Date.now() / 1000);
+  const ticket = Date.now();
+  const query = qs({ ...dev, ts: String(khronos), _rticket: String(ticket) });
+  setSignDevice({ device_id: dev.device_id, version_name: dev.version_name });
+  const sig = signHeaders(query, Buffer.from(body), khronos);
+
+  const url = `${API_HOST}/novel/commentapi/comment/list/${vid}/v1/?${query}`;
+  const { status, data } = await fetchText(
+    url,
+    {
+      "User-Agent": APP_UA,
+      "Content-Type": "application/json; charset=UTF-8",
+      Accept: "application/json",
+      "x-ss-req-ticket": String(ticket),
+      "x-tt-request-tag": "t=0;n=0",
+      "sdk-version": "2",
+      "passport-sdk-version": "50561",
+      "x-xs-from-web": "0",
+      ...sig,
+    },
+    25000,
+    { method: "POST", body }
+  );
+
+  const txt = data.toString("utf8");
+  const j = jsonBody(txt);
+  const code = Number((j && (j.code ?? j.Code)) ?? -1);
+  if (status !== 200 || !j) throw new Error(`danmaku HTTP ${status}`);
+  if (code !== 0) throw new Error(`danmaku 失败 ${code}: ${j.Message || j.message || ""}`);
+
+  const d = j.data || {};
+  const info = d.common_list_info || {};
+  const rows = d.data_list || [];
+
+  const items = [];
+  for (const row of rows) {
+    const c = row.comment || {};
+    const common = c.common || {};
+    const expand = c.expand || {};
+    const stat = c.stat || {};
+    const text = seen(((common.content || {}).text));
+    const offset = Number(expand.offset_time || 0);
+    if (!text) continue;
+    items.push({
+      id: seen(c.comment_id),
+      text,
+      offset_ms: offset,
+      offset_sec: Math.round(offset / 100) / 10,
+      digg: Number(stat.digg_count || 0),
+      reply: Number(stat.reply_count || 0),
+      user_id: seen((common.user_info || {}).user_id),
+    });
+  }
+  items.sort((a, b) => a.offset_ms - b.offset_ms);
+
+  return {
+    items,
+    cursor: seen(info.cursor),
+    has_more: Boolean(info.has_more) && Boolean(info.cursor),
+    next_offset_ms: Number((d.extra || {}).next_query_danmaku_list_time || 0),
+    count: Number(((d.common_list_info || {}).cursor
+      ? (jsonBody(info.cursor) || {}).danmaku_count
+      : 0) || 0),
+  };
 }
 
 /** 预热：提前把解析结果放进缓存（失败忽略） */
@@ -843,6 +950,7 @@ const server = http.createServer(async (req, res) => {
           blankSenc: true,        // 清除 senc/saiz/saio（修黑屏的关键）
           fullLengthNoRange: true, // 无 Range 时返回 200 + 完整长度
           cencDecrypt: true,
+          danmaku: true,
         },
         endpoints: ["/api/detail", "/api/episodes", "/api/play", "/api/stream", "/api/download"],
       });
@@ -946,6 +1054,42 @@ const server = http.createServer(async (req, res) => {
         cenc_key_hex: s.key ? Buffer.from(s.key).toString("hex") : null,
         stream_url: `/api/stream?vid=${vid}`,
         download_url: `/api/download?vid=${vid}`,
+      });
+      return;
+    }
+
+    // --- 弹幕
+    if (path === "/api/danmaku") {
+      const vid = seen(url.searchParams.get("vid"));
+      const seriesId = seen(url.searchParams.get("series_id"));
+      const cursor = url.searchParams.get("cursor") || "";
+      const offsetMs = Number(url.searchParams.get("offset_ms") || 0);
+      if (!vid) return sendJSON(res, 400, { ok: false, error: "缺少 vid" });
+      if (!seriesId) return sendJSON(res, 400, { ok: false, error: "缺少 series_id" });
+
+      // 需要整集时长（服务端要传给上游）
+      const s = await resolveStream(vid);
+      const durationMs = Math.round(Number(s.duration || 0) * 1000);
+
+      const key = `dm:${vid}:${cursor}:${offsetMs}`;
+      const hit = danmakuCache.get(key);
+      let page;
+      if (hit && Date.now() - hit.time < CACHE_TTL) {
+        page = hit.value;
+      } else {
+        page = await fetchDanmaku(vid, seriesId, durationMs, cursor, offsetMs);
+        danmakuCache.set(key, { time: Date.now(), value: page });
+      }
+
+      sendJSON(res, 200, {
+        ok: true,
+        vid,
+        count: page.items.length,
+        total: page.count,
+        has_more: page.has_more,
+        next_cursor: page.cursor,
+        next_offset_ms: page.next_offset_ms,
+        items: page.items,
       });
       return;
     }
