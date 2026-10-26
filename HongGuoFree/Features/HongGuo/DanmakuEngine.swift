@@ -82,7 +82,7 @@ extension HGServerClient {
 
 // MARK: - 设置
 
-struct DanmakuSettings: Equatable {
+struct DanmakuSettings: Equatable, Codable {
     var enabled = true
     /// 屏幕占用比例（0.3 = 只在上面 30% 区域滚动）
     var areaRatio: Double = 0.45
@@ -110,12 +110,30 @@ struct ScheduledDanmaku: Identifiable {
 
 @MainActor
 final class DanmakuEngine: ObservableObject {
-    @Published var settings = DanmakuSettings()
+    private static let settingsKey = "hg.danmaku.settings.v1"
+
+    @Published var settings: DanmakuSettings {
+        didSet { persist() }
+    }
     @Published private(set) var scheduled: [ScheduledDanmaku] = []
     @Published private(set) var total = 0
     @Published private(set) var loading = false
 
     private var raw: [HGDmakuItem] = []
+
+    init() {
+        if let data = UserDefaults.standard.data(forKey: Self.settingsKey),
+           let saved = try? JSONDecoder().decode(DanmakuSettings.self, from: data) {
+            settings = saved
+        } else {
+            settings = DanmakuSettings()
+        }
+    }
+
+    private func persist() {
+        guard let data = try? JSONEncoder().encode(settings) else { return }
+        UserDefaults.standard.set(data, forKey: Self.settingsKey)
+    }
 
     /// 当前可用的轨道数（随屏幕高度和字号变化）
     func laneCount(for height: CGFloat) -> Int {

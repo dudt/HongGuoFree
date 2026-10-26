@@ -195,3 +195,51 @@ final class HGFeedStore: ObservableObject {
         loadedTabs.removeAll()
     }
 }
+
+
+// MARK: - 搜索
+
+struct HGSearchResponse: Decodable {
+    var ok: Bool
+    var q: String?
+    var count: Int?
+    var totalIndexed: Int?
+    var items: [HGFeedItem]?
+
+    enum CodingKeys: String, CodingKey {
+        case ok, q, count, items
+        case totalIndexed = "total_indexed"
+    }
+}
+
+extension HGServerClient {
+    func search(_ query: String) async throws -> HGSearchResponse {
+        guard let base = config.normalized else { throw HGServeError.notConfigured }
+        var baseStr = base.absoluteString
+        while baseStr.hasSuffix("/") { baseStr.removeLast() }
+
+        guard var comps = URLComponents(string: baseStr + "/api/search") else {
+            throw HGServeError.badPath("/api/search")
+        }
+        var items = [URLQueryItem(name: "q", value: query)]
+        if !config.token.isEmpty {
+            items.append(URLQueryItem(name: "token", value: config.token))
+        }
+        comps.queryItems = items
+        guard let url = comps.url else { throw HGServeError.badPath("/api/search") }
+
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 90   // 首次建索引要十几秒
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        if !config.token.isEmpty {
+            req.setValue(config.token, forHTTPHeaderField: "X-Auth-Token")
+        }
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let msg = String(data: data, encoding: .utf8) ?? ""
+            throw HGServeError.http((resp as? HTTPURLResponse)?.statusCode ?? -1,
+                                    String(msg.prefix(160)))
+        }
+        return try JSONDecoder().decode(HGSearchResponse.self, from: data)
+    }
+}

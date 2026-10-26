@@ -47,7 +47,7 @@ const WEB_UA =
 const SEG_SIZE = 32 * 1024 * 1024;
 
 // 版本号：解密/头部处理逻辑有改动就 +1
-const SERVER_VERSION = "12";
+const SERVER_VERSION = "14";
 
 // ---------------------------------------------------------------- 工具
 
@@ -491,6 +491,94 @@ function blankAuxBoxes(data) {
       }
     }
   }
+}
+
+/**
+ * 从清理过的 header 里解析每条轨道的真实参数。
+ * 只读 box 结构，不做解码，所以很快。
+ */
+function parseTracksFromHeader(header) {
+  const out = [];
+  const ftypSize = header.length >= 8 ? header.readUInt32BE(0) : 0;
+  const moov = readBox(header, ftypSize);
+  if (!moov || moov.type !== "moov") return out;
+  const moovBody = header.subarray(moov.bodyStart, moov.offset + moov.size);
+
+  let cursor = 0;
+  for (;;) {
+    const trak = findBox(moovBody, "trak", cursor);
+    if (!trak) break;
+    cursor = trak.offset + trak.size;
+
+    // hdlr 判断轨道类型
+    const hdlr = boxBody(moovBody, "hdlr", trak.bodyStart);
+    let kind = "";
+    if (hdlr && hdlr.length > 12) {
+      kind = hdlr.toString("ascii", 8, 12);
+    }
+
+    // 视频：tkhd 宽高（16.16 定点，单位像素）
+    let width = 0;
+    let height = 0;
+    const tkhd = boxBody(moovBody, "tkhd", trak.bodyStart);
+    if (tkhd && tkhd.length >= 84) {
+      const ver = tkhd[0];
+      // v0: 8+ 偏移，v1: 92
+      const wOff = ver === 1 ? 88 : 76;
+      if (tkhd.length >= wOff + 8) {
+        width = Math.round(tkhd.readUInt32BE(wOff) / 65536);
+        height = Math.round(tkhd.readUInt32BE(wOff + 4) / 65536);
+      }
+    }
+
+    // 编码类型：stsd 里的 entry fourcc
+    let codec = "";
+    const stsd = boxBody(moovBody, "stsd", trak.bodyStart);
+    if (stsd && stsd.length >= 16) {
+      codec = stsd.toString("ascii", 12, 16).trim();
+      // encv/enca 已被改名，这里读到的是 hvc1/mp4a
+    }
+
+    // 时长：mdhd
+    let durationSec = 0;
+    const mdhd = boxBody(moovBody, "mdhd", trak.bodyStart);
+    if (mdhd && mdhd.length >= 24) {
+      const ver = mdhd[0];
+      if (ver === 1 && mdhd.length >= 32) {
+        const timescale = mdhd.readUInt32BE(20);
+        const dur = Number(mdhd.readBigUInt64BE(24));
+        if (timescale) durationSec = dur / timescale;
+      } else if (mdhd.length >= 24) {
+        const timescale = mdhd.readUInt32BE(12);
+        const dur = mdhd.readUInt32BE(16);
+        if (timescale) durationSec = dur / timescale;
+      }
+    }
+
+    // 样本数：stsz
+    let sampleCount = 0;
+    const stsz = boxBody(moovBody, "stsz", trak.bodyStart);
+    if (stsz && stsz.length >= 12) sampleCount = stsz.readUInt32BE(8);
+
+    // 帧率 = 样本数 / 时长
+    let fps = 0;
+    if (kind === "vide" && durationSec > 0 && sampleCount > 0) {
+      fps = Math.round((sampleCount / durationSec) * 100) / 100;
+    }
+
+    if (kind === "vide" || kind === "soun") {
+      out.push({
+        type: kind === "vide" ? "video" : "audio",
+        codec: codec || "unknown",
+        width,
+        height,
+        fps,
+        duration: Math.round(durationSec * 100) / 100,
+        samples: sampleCount,
+      });
+    }
+  }
+  return out;
 }
 
 function prepareCencHeader(data, key) {
@@ -982,6 +1070,69 @@ async function albumDetail(seriesId) {
 }
 
 /** 发现页：feed + 并发补详情 */
+/**
+ * 搜索索引：把 4 个 tab 的 feed 全量翻一遍，按 seriesId 去重缓存。
+ * 首次构建约 5~8 秒，之后 10 分钟内复用。
+ */
+const SEARCH_TABS = [201, 202, 203, 204];
+const SEARCH_INDEX_TTL = 10 * 60 * 1000;
+let searchIndex = { time: 0, items: [] };
+let searchIndexInflight = null;
+
+async function buildSearchIndex() {
+  if (searchIndex.items.length && Date.now() - searchIndex.time < SEARCH_INDEX_TTL) {
+    return searchIndex;
+  }
+  if (searchIndexInflight) return searchIndexInflight;
+
+  searchIndexInflight = (async () => {
+    const map = new Map();
+
+    // 并行：4 个 tab × 每个 tab 内 6 个 offset 并发
+    // 串行翻页实测要 67 秒，并发后约 8~12 秒
+    const jobs = [];
+    for (const tab of SEARCH_TABS) {
+      for (let page = 0; page < 6; page += 1) {
+        const offset = page * 24;
+        jobs.push((async () => {
+          try {
+            const r = await mallFeed(tab, offset, 24);
+            return { tab, rows: r.items || [] };
+          } catch {
+            return { tab, rows: [] };
+          }
+        })());
+      }
+    }
+
+    const results = await Promise.all(jobs);
+    for (const { tab, rows } of results) {
+      for (const it of rows) {
+        if (!it.seriesId || map.has(it.seriesId)) continue;
+        map.set(it.seriesId, {
+          series_id: it.seriesId,
+          title: it.title || "",
+          cover: it.cover || "",
+          tags: it.tags || [],
+          episode_text: it.episodeText || "",
+          tab,
+        });
+      }
+    }
+
+    const items = [...map.values()];
+    searchIndex = { time: Date.now(), items };
+    console.error("[search] 索引 %d 部", items.length);
+    return searchIndex;
+  })();
+
+  try {
+    return await searchIndexInflight;
+  } finally {
+    searchIndexInflight = null;
+  }
+}
+
 async function discover(tabType, offset, count) {
   const feed = await mallFeed(tabType, offset, count);
   const uniq = feed.items;
@@ -1164,6 +1315,85 @@ const server = http.createServer(async (req, res) => {
     }
 
     // --- 发现页：真实短剧列表
+    // --- 本地索引搜索
+    //
+    // 红果 App 没有公开的搜索接口（试过的路径全 404），
+    // 所以服务端自己建索引：把 4 个 tab 的 feed 全量翻一遍缓存起来，
+    // 搜索时在本地做标题匹配。首次搜索会触发建索引（约 5~8 秒），
+    // 之后命中缓存就是毫秒级。
+    // --- 视频真实参数（从 moov 里解析，不依赖客户端猜测）
+    if (path === "/api/probe") {
+      const vid = seen(url.searchParams.get("vid"));
+      if (!vid) return sendJSON(res, 400, { ok: false, error: "缺少 vid" }, req);
+
+      const s = await resolveStream(vid);
+      const info = {
+        ok: true,
+        vid: s.vid,
+        quality_label: s.quality,
+        duration: s.duration,
+        total_bytes: s.total,
+        encrypted: s.encrypted,
+        // 平均码率（kbps）= 字节数 * 8 / 时长 / 1000
+        avg_bitrate_kbps: s.duration > 0
+          ? Math.round((s.total * 8) / s.duration / 1000)
+          : 0,
+        tracks: [],
+      };
+
+      if (s.prepared && s.prepared.header) {
+        const h = s.prepared.header;
+        const parsed = parseTracksFromHeader(h);
+        info.tracks = parsed;
+        const v = parsed.find((t) => t.type === "video");
+        if (v) {
+          info.width = v.width;
+          info.height = v.height;
+          info.codec = v.codec;
+          info.fps = v.fps;
+          // 真实分辨率对应的档位
+          info.real_quality = v.height >= 2000 ? "4K"
+            : v.height >= 1400 ? "2K"
+            : v.height >= 1000 ? "1080P"
+            : v.height >= 700 ? "720P"
+            : v.height >= 500 ? "540P" : "480P";
+          info.is_true_1080p = v.height >= 1000;
+        }
+      }
+      sendJSON(res, 200, info, req);
+      return;
+    }
+
+    if (path === "/api/search") {
+      const q = seen(url.searchParams.get("q")).trim();
+      if (!q) return sendJSON(res, 400, { ok: false, error: "缺少 q" }, req);
+
+      const index = await buildSearchIndex();
+      const needle = q.toLowerCase();
+      const hits = [];
+      for (const it of index.items) {
+        const title = (it.title || "").toLowerCase();
+        const tags = (it.tags || []).join(" ").toLowerCase();
+        if (title.includes(needle) || tags.includes(needle)) {
+          // 标题开头命中优先
+          const score = title.startsWith(needle) ? 0
+            : title.includes(needle) ? 1 : 2;
+          hits.push({ score, it });
+        }
+      }
+      hits.sort((a, b) => a.score - b.score);
+      const items = hits.slice(0, 60).map((h) => h.it);
+      sendJSON(res, 200, {
+        ok: true,
+        q,
+        count: items.length,
+        total_indexed: index.items.length,
+        indexed_at: index.time,
+        items,
+      }, req);
+      return;
+    }
+
     if (path === "/api/discover") {
       const tab = Number(url.searchParams.get("tab") || 201);
       const offset = Number(url.searchParams.get("offset") || 0);
@@ -1562,3 +1792,10 @@ server.listen(PORT, HOST, () => {
   console.log(`  鉴权: ${ACCESS_TOKEN ? "已启用 ACCESS_TOKEN" : "未启用（任何人可访问）"}`);
   console.log(`  接口: /api/detail /api/episodes /api/play /api/stream /api/download`);
 });
+
+// 启动后后台预建搜索索引，用户第一次搜索时就是热的
+setTimeout(() => {
+  buildSearchIndex()
+    .then((x) => console.error("[search] 预热完成 %d 部", x.items.length))
+    .catch((e) => console.error("[search] 预热失败", e.message));
+}, 3000);

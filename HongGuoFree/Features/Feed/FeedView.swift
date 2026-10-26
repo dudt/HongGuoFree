@@ -6,7 +6,8 @@ struct FeedView: View {
     @EnvironmentObject private var feed: HGFeedStore
     @EnvironmentObject private var library: HGLibraryStore
 
-    @State private var playerSeries: HGFeedItem?
+        @State private var showSearch = false
+@State private var playerSeries: HGFeedItem?
 
     // 服务端 tab 语义：201 推荐 / 202 追剧 / 203 榜单 / 204 新剧
     private let tabs: [(id: Int, name: String)] = [
@@ -105,7 +106,12 @@ struct FeedView: View {
             .onChange(of: settings.resolverBaseURL) { _ in
                 Task { await feed.reload(config: settings.resolverConfig) }
             }
-            .fullScreenCover(item: $playerSeries) { item in
+            .sheet(isPresented: $showSearch) {
+            SearchView()
+                .environmentObject(settings)
+                .environmentObject(library)
+        }
+        .fullScreenCover(item: $playerSeries) { item in
                 ResolverPlayerView(
                     seriesID: item.seriesID,
                     seriesTitle: item.title ?? "红果短剧"
@@ -153,6 +159,15 @@ struct FeedView: View {
     private var continueSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
+                Button { showSearch = true } label: {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Palette.textPrimary)
+                        .frame(width: 32, height: 32)
+                        .background(Palette.surface)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
                 Image(systemName: "play.circle.fill")
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.accent)

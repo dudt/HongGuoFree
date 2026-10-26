@@ -272,3 +272,75 @@ extension Data {
         self = Data(out)
     }
 }
+
+
+// MARK: - 视频真实参数
+
+struct HGProbe: Decodable {
+    struct Track: Decodable, Identifiable {
+        var type: String
+        var codec: String?
+        var width: Int?
+        var height: Int?
+        var fps: Double?
+        var duration: Double?
+        var samples: Int?
+
+        var id: String { type + (codec ?? "") }
+    }
+
+    var ok: Bool
+    var qualityLabel: String?
+    var realQuality: String?
+    var isTrue1080p: Bool?
+    var width: Int?
+    var height: Int?
+    var codec: String?
+    var fps: Double?
+    var duration: Double?
+    var totalBytes: Int64?
+    var avgBitrateKbps: Int?
+    var encrypted: Bool?
+    var tracks: [Track]?
+
+    enum CodingKeys: String, CodingKey {
+        case ok, width, height, codec, fps, duration, encrypted, tracks
+        case qualityLabel = "quality_label"
+        case realQuality = "real_quality"
+        case isTrue1080p = "is_true_1080p"
+        case totalBytes = "total_bytes"
+        case avgBitrateKbps = "avg_bitrate_kbps"
+    }
+}
+
+extension HGServerClient {
+    func probe(vid: String) async throws -> HGProbe {
+        guard let base = config.normalized else { throw HGServeError.notConfigured }
+        var baseStr = base.absoluteString
+        while baseStr.hasSuffix("/") { baseStr.removeLast() }
+
+        guard var comps = URLComponents(string: baseStr + "/api/probe") else {
+            throw HGServeError.badPath("/api/probe")
+        }
+        var items = [URLQueryItem(name: "vid", value: vid)]
+        if !config.token.isEmpty {
+            items.append(URLQueryItem(name: "token", value: config.token))
+        }
+        comps.queryItems = items
+        guard let url = comps.url else { throw HGServeError.badPath("/api/probe") }
+
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 40
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        if !config.token.isEmpty {
+            req.setValue(config.token, forHTTPHeaderField: "X-Auth-Token")
+        }
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let msg = String(data: data, encoding: .utf8) ?? ""
+            throw HGServeError.http((resp as? HTTPURLResponse)?.statusCode ?? -1,
+                                    String(msg.prefix(160)))
+        }
+        return try JSONDecoder().decode(HGProbe.self, from: data)
+    }
+}

@@ -79,6 +79,9 @@ struct ResolverPlayerView: View {
     @State private var isDirectPlaying = false
     @State private var prepareProgress: Double = -1
     @State private var prepareText: String = ""
+    @State private var probe: HGProbe?
+    @State private var showProbe = false
+    @State private var isLandscape = false
 
     // 播放
     @State private var controller = PlayerController()
@@ -141,7 +144,21 @@ struct ResolverPlayerView: View {
                 controlsLayer.transition(.opacity)
             }
 
-            if let hud {
+            // 拖动进度时的预览气泡（Telegram 风格）
+            if gestureMode == .seeking {
+                VStack(spacing: 4) {
+                    Text(fmt(seekTarget))
+                        .font(.system(size: 20, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white)
+                    Text(fmt(duration))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+                .padding(.horizontal, 22).padding(.vertical, 14)
+                .background(.black.opacity(0.72))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .allowsHitTesting(false)
+            } else if let hud {
                 hudView(hud.text, icon: hud.icon).allowsHitTesting(false)
             }
 
@@ -181,6 +198,7 @@ struct ResolverPlayerView: View {
         .sheet(isPresented: $showEpisodes) { episodeSheet }
         .sheet(isPresented: $showQuality) { qualitySheet }
         .sheet(isPresented: $showDanmakuSettings) { danmakuSettingsSheet }
+        .sheet(isPresented: $showProbe) { probeSheet }
         .onDisappear {
             teardown()
             PlaybackAudioSession.deactivate()
@@ -426,6 +444,9 @@ struct ResolverPlayerView: View {
                 Button { showEpisodes = true } label: {
                     Label("选集", systemImage: "list.bullet")
                 }
+                Button { showProbe = true } label: {
+                    Label("视频参数", systemImage: "info.circle")
+                }
                 Divider()
                 ForEach([Float(0.75), 1.0, 1.25, 1.5, 2.0], id: \.self) { r in
                     Button { setRate(r) } label: {
@@ -540,7 +561,20 @@ struct ResolverPlayerView: View {
                     Text("弹幕 \(danmaku.total)")
                         .font(.system(size: 10)).foregroundStyle(.white.opacity(0.5))
                 }
+
                 Spacer()
+
+                // 横竖屏切换
+                Button { toggleOrientation() } label: {
+                    Image(systemName: isLandscape
+                          ? "rectangle.portrait" : "rectangle.landscape.rotate")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 9).padding(.vertical, 5)
+                        .background(.white.opacity(0.16))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 14).padding(.bottom, 20).padding(.top, 30)
@@ -666,6 +700,130 @@ struct ResolverPlayerView: View {
             }
             .navigationTitle("清晰度").navigationBarTitleDisplayMode(.inline)
         }
+    }
+
+    private var probeSheet: some View {
+        NavigationStack {
+            ZStack {
+                Palette.background.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if let p = probe {
+                            // 结论卡
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: (p.isTrue1080p ?? false)
+                                          ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                                        .foregroundStyle((p.isTrue1080p ?? false)
+                                                         ? .green : .orange)
+                                    Text((p.isTrue1080p ?? false) ? "真高清" : "清晰度偏低")
+                                        .font(.system(size: 14, weight: .bold))
+                                        .foregroundStyle(Palette.textPrimary)
+                                    Spacer()
+                                    Text(p.realQuality ?? "-")
+                                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                        .foregroundStyle(Palette.accent)
+                                }
+                                Text("\(p.width ?? 0) × \(p.height ?? 0)  ·  \(p.codec ?? "-")  ·  \(String(format: "%.0f", p.fps ?? 0)) fps")
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(Palette.textSecondary)
+                            }
+                            .padding(14)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Palette.surface)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                            // 明细
+                            VStack(spacing: 0) {
+                                row("标称清晰度", p.qualityLabel ?? "-")
+                                row("真实分辨率", "\(p.width ?? 0)×\(p.height ?? 0)")
+                                row("视频编码", p.codec ?? "-")
+                                row("帧率", String(format: "%.2f fps", p.fps ?? 0))
+                                row("时长", fmt(p.duration ?? 0))
+                                row("文件大小", bytes(p.totalBytes ?? 0))
+                                row("平均码率", "\(p.avgBitrateKbps ?? 0) kbps")
+                                row("是否加密", (p.encrypted ?? false) ? "是（CENC）" : "否")
+                            }
+                            .background(Palette.surface)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                            // 轨道
+                            if let ts = p.tracks, !ts.isEmpty {
+                                Text("轨道明细")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(Palette.textSecondary)
+                                VStack(spacing: 0) {
+                                    ForEach(ts) { t in
+                                        HStack {
+                                            Text(t.type == "video" ? "视频" : "音频")
+                                                .font(.system(size: 12, weight: .medium))
+                                                .foregroundStyle(Palette.textPrimary)
+                                                .frame(width: 40, alignment: .leading)
+                                            Text(t.codec ?? "-")
+                                                .font(.system(size: 11, design: .monospaced))
+                                                .foregroundStyle(Palette.textSecondary)
+                                            Spacer()
+                                            if t.type == "video" {
+                                                Text("\(t.width ?? 0)×\(t.height ?? 0)")
+                                                    .font(.system(size: 11, design: .monospaced))
+                                                    .foregroundStyle(Palette.textSecondary)
+                                            }
+                                            Text("\(t.samples ?? 0) 样本")
+                                                .font(.system(size: 10, design: .monospaced))
+                                                .foregroundStyle(Palette.textTertiary)
+                                        }
+                                        .padding(.horizontal, 12).padding(.vertical, 9)
+                                        Divider().overlay(Palette.textTertiary.opacity(0.12))
+                                    }
+                                }
+                                .background(Palette.surface)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                            }
+
+                            Text("参数直接解析自 MP4 的 moov，不是客户端猜测。\n码率 = 文件大小 × 8 ÷ 时长。")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Palette.textTertiary)
+                        } else {
+                            HStack(spacing: 8) {
+                                ProgressView().tint(Palette.accent)
+                                Text("正在解析…")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(Palette.textSecondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 40)
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+            .navigationTitle("视频参数")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { showProbe = false }
+                }
+            }
+        }
+    }
+
+    private func row(_ k: String, _ v: String) -> some View {
+        HStack {
+            Text(k).font(.system(size: 12)).foregroundStyle(Palette.textSecondary)
+            Spacer()
+            Text(v).font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(Palette.textPrimary)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .overlay(alignment: .bottom) {
+            Divider().overlay(Palette.textTertiary.opacity(0.12))
+        }
+    }
+
+    private func bytes(_ n: Int64) -> String {
+        let f = ByteCountFormatter()
+        f.countStyle = .file
+        return f.string(fromByteCount: n)
     }
 
     private var danmakuSettingsSheet: some View {
@@ -845,9 +1003,18 @@ struct ResolverPlayerView: View {
 
             danmaku.clear()
             Task { await loadDanmaku(for: ep) }
+            Task { await loadProbe(for: ep) }
             scheduleHideControls()
         } catch {
             errorText = error.localizedDescription
+        }
+    }
+
+    private func loadProbe(for ep: HGServerEpisode) async {
+        do {
+            probe = try await client.probe(vid: ep.vid)
+        } catch {
+            probe = nil
         }
     }
 
@@ -904,6 +1071,21 @@ struct ResolverPlayerView: View {
     private func setRate(_ r: Float) {
         rate = r
         if gestureMode != .boosting { controller.setRate(r) }
+    }
+
+    /// 横竖屏切换：直接改 window 的方向掩码，兼容 iOS 16+
+    private func toggleOrientation() {
+        let target: UIInterfaceOrientationMask = isLandscape ? .portrait : .landscapeRight
+        guard let scene = UIApplication.shared.connectedScenes
+            .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene else {
+            return
+        }
+        isLandscape.toggle()
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: target))
+        // 让 SwiftUI 重新布局
+        if let root = scene.windows.first?.rootViewController {
+            root.setNeedsUpdateOfSupportedInterfaceOrientations()
+        }
     }
 
     private func toggleControls() {
