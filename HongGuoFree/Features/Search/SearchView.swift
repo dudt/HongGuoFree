@@ -14,7 +14,8 @@ struct SearchView: View {
     @State private var results: [HGFeedItem] = []
     @State private var searching = false
     @State private var errorText: String?
-    @State private var indexedTotal = 0
+    @State private var totalCount = 0
+    @State private var recommended = false
     @State private var playerSeries: HGFeedItem?
 
     @FocusState private var focused: Bool
@@ -49,7 +50,7 @@ struct SearchView: View {
                     } else if searching {
                         VStack(spacing: 12) {
                             ProgressView().tint(Palette.accent)
-                            Text(indexedTotal == 0 ? "首次搜索要建索引，约 10 秒…" : "搜索中…")
+                            Text("搜索中…")
                                 .font(.system(size: 12))
                                 .foregroundStyle(Palette.textTertiary)
                         }
@@ -163,7 +164,9 @@ struct SearchView: View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 HStack {
-                    Text("\(results.count) 个结果")
+                    Text(recommended
+                         ? "\(results.count) 个相关推荐"
+                         : "\(results.count) 个结果（共 \(totalCount) 部）")
                         .font(.system(size: 11))
                         .foregroundStyle(Palette.textTertiary)
                     Spacer()
@@ -240,7 +243,8 @@ struct SearchView: View {
         do {
             let resp = try await client.search(q)
             results = resp.items ?? []
-            indexedTotal = resp.totalIndexed ?? 0
+            totalCount = resp.total ?? 0
+            recommended = resp.recommended ?? false
             if results.isEmpty {
                 errorText = nil
             }

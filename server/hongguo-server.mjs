@@ -33,13 +33,16 @@ const HOST = process.env.HOST || "0.0.0.0";
 // 可选访问口令：设置后所有接口需要 ?token=xxx 或 X-Auth-Token 头
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN || "";
 
+const SEARCH_CACHE_TTL = 5 * 60 * 1000;
+const searchCache = new Map();
+
 const API_HOST = "https://api5-normal-sinfonlineb.fqnovel.com";
 const MODEL_PATH = "/novel/player/multi_video_model/v1/";
 const WEB = "https://hongguoduanju.com";
 const APP_UA =
   "com.phoenix.read/74232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)";
 const WEB_UA =
-  "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36";
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 // 单次回传上限。
 // 红果单集最大约 20 MB（1080P / 2~3 分钟），设 32 MiB 保证一集能一次性给完，
@@ -47,7 +50,7 @@ const WEB_UA =
 const SEG_SIZE = 32 * 1024 * 1024;
 
 // 版本号：解密/头部处理逻辑有改动就 +1
-const SERVER_VERSION = "14";
+const SERVER_VERSION = "15";
 
 // ---------------------------------------------------------------- 工具
 
@@ -1070,69 +1073,6 @@ async function albumDetail(seriesId) {
 }
 
 /** 发现页：feed + 并发补详情 */
-/**
- * 搜索索引：把 4 个 tab 的 feed 全量翻一遍，按 seriesId 去重缓存。
- * 首次构建约 5~8 秒，之后 10 分钟内复用。
- */
-const SEARCH_TABS = [201, 202, 203, 204];
-const SEARCH_INDEX_TTL = 10 * 60 * 1000;
-let searchIndex = { time: 0, items: [] };
-let searchIndexInflight = null;
-
-async function buildSearchIndex() {
-  if (searchIndex.items.length && Date.now() - searchIndex.time < SEARCH_INDEX_TTL) {
-    return searchIndex;
-  }
-  if (searchIndexInflight) return searchIndexInflight;
-
-  searchIndexInflight = (async () => {
-    const map = new Map();
-
-    // 并行：4 个 tab × 每个 tab 内 6 个 offset 并发
-    // 串行翻页实测要 67 秒，并发后约 8~12 秒
-    const jobs = [];
-    for (const tab of SEARCH_TABS) {
-      for (let page = 0; page < 6; page += 1) {
-        const offset = page * 24;
-        jobs.push((async () => {
-          try {
-            const r = await mallFeed(tab, offset, 24);
-            return { tab, rows: r.items || [] };
-          } catch {
-            return { tab, rows: [] };
-          }
-        })());
-      }
-    }
-
-    const results = await Promise.all(jobs);
-    for (const { tab, rows } of results) {
-      for (const it of rows) {
-        if (!it.seriesId || map.has(it.seriesId)) continue;
-        map.set(it.seriesId, {
-          series_id: it.seriesId,
-          title: it.title || "",
-          cover: it.cover || "",
-          tags: it.tags || [],
-          episode_text: it.episodeText || "",
-          tab,
-        });
-      }
-    }
-
-    const items = [...map.values()];
-    searchIndex = { time: Date.now(), items };
-    console.error("[search] 索引 %d 部", items.length);
-    return searchIndex;
-  })();
-
-  try {
-    return await searchIndexInflight;
-  } finally {
-    searchIndexInflight = null;
-  }
-}
-
 async function discover(tabType, offset, count) {
   const feed = await mallFeed(tabType, offset, count);
   const uniq = feed.items;
@@ -1315,12 +1255,106 @@ const server = http.createServer(async (req, res) => {
     }
 
     // --- 发现页：真实短剧列表
-    // --- 本地索引搜索
+    // --- 搜索（走网页端 API，无需签名）
     //
-    // 红果 App 没有公开的搜索接口（试过的路径全 404），
-    // 所以服务端自己建索引：把 4 个 tab 的 feed 全量翻一遍缓存起来，
-    // 搜索时在本地做标题匹配。首次搜索会触发建索引（约 5~8 秒），
-    // 之后命中缓存就是毫秒级。
+    // 网页端 hongguoduanju.com 用的是同域接口：
+    //   GET /api/search/result?aid=8662&query=XXX&page=N
+    // 实测不需要 msToken / a_bogus 也能返回 200。
+    //
+    // 上游对无匹配的关键词会返回「推荐兜底」（无关结果），
+    // 所以这里做一次标题/分类的二次过滤，只保留真正命中的。
+    if (path === "/api/search") {
+      const q = seen(url.searchParams.get("q")).trim();
+      if (!q) return sendJSON(res, 400, { ok: false, error: "缺少 q" }, req);
+
+      const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
+      const key = `s:${q}:${page}`;
+      const hit = searchCache.get(key);
+      if (hit && Date.now() - hit.time < SEARCH_CACHE_TTL) {
+        sendJSON(res, 200, hit.value, req);
+        return;
+      }
+
+      const api = `${WEB}/api/search/result?${qs({ aid: "8662", query: q, page: String(page) })}`;
+      const { status, data } = await fetchText(api, {
+        "User-Agent": WEB_UA,
+        Accept: "application/json",
+        Referer: `${WEB}/search/`,
+      });
+      if (status !== 200) {
+        sendJSON(res, 502, { ok: false, error: `搜索上游 HTTP ${status}` }, req);
+        return;
+      }
+      const j = jsonBody(data.toString("utf8")) || {};
+      const raw = j.searchList || [];
+
+      const needle = q.toLowerCase();
+      const items = [];
+      let matched = 0;
+      for (const cell of raw) {
+        const vd = cell.video_data || {};
+        const sid = seen(vd.series_id);
+        if (!sid) continue;
+        const title = seen(vd.series_title || cell.name);
+        const cats = (vd.category_list || []).map((c) => seen(c.name)).filter(Boolean);
+        const intro = seen(vd.series_intro);
+
+        // 命中判定：标题 > 分类 > 简介
+        // 上游对有效关键词返回的结果本身已经很准，
+        // 所以只要标题或分类有一个命中就算（简介不参与，
+        // 否则「甜宠」这类词会因为简介里的偶然提及而误判）。
+        const hitText = title.toLowerCase().includes(needle)
+          || cats.some((c) => c.toLowerCase().includes(needle));
+        if (hitText) matched += 1;
+
+        items.push({
+          series_id: sid,
+          item_id: null,
+          title,
+          cover: cleanUpstreamUrl(vd.series_cover),
+          intro,
+          tags: cats,
+          episode_text: seen(vd.episode_right_text),
+          episode_count: Number(vd.episode_cnt) || null,
+          free_episodes: null,
+          play_count: seen((vd.hot_score_data || {}).text),
+          followed_count: seen(vd.favorite_text),
+          like_text: seen(vd.like_text),
+          _matched: hitText,
+        });
+      }
+
+      // 上游没给出任何真命中 → 说明它返回的是「推荐兜底」，
+      // 这时候直接给空，避免用无关结果糊弄用户。
+      // 但如果上游结果很少（<3）且我们过滤掉太多，
+      // 就放宽成「上游给什么就返回什么」，并标注 recommended。
+      let useItems = items.filter((x) => x._matched);
+      let recommended = false;
+      if (matched === 0 && items.length > 0) {
+        useItems = [];
+      } else if (useItems.length < 3 && items.length >= 3) {
+        useItems = items;
+        recommended = true;
+      }
+      for (const it of useItems) delete it._matched;
+
+      const payload = {
+        ok: true,
+        q,
+        page,
+        count: useItems.length,
+        total: Number(j.totalCount) || 0,
+        total_pages: Number(j.totalPages) || 0,
+        has_more: Boolean(j.hasMore) && useItems.length > 0,
+        source: "web",
+        recommended,
+        items: useItems,
+      };
+      searchCache.set(key, { time: Date.now(), value: payload });
+      sendJSON(res, 200, payload, req);
+      return;
+    }
+
     // --- 视频真实参数（从 moov 里解析，不依赖客户端猜测）
     if (path === "/api/probe") {
       const vid = seen(url.searchParams.get("vid"));
@@ -1792,10 +1826,3 @@ server.listen(PORT, HOST, () => {
   console.log(`  鉴权: ${ACCESS_TOKEN ? "已启用 ACCESS_TOKEN" : "未启用（任何人可访问）"}`);
   console.log(`  接口: /api/detail /api/episodes /api/play /api/stream /api/download`);
 });
-
-// 启动后后台预建搜索索引，用户第一次搜索时就是热的
-setTimeout(() => {
-  buildSearchIndex()
-    .then((x) => console.error("[search] 预热完成 %d 部", x.items.length))
-    .catch((e) => console.error("[search] 预热失败", e.message));
-}, 3000);

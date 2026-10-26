@@ -203,17 +203,21 @@ struct HGSearchResponse: Decodable {
     var ok: Bool
     var q: String?
     var count: Int?
-    var totalIndexed: Int?
+    var total: Int?
+    var totalPages: Int?
+    var hasMore: Bool?
+    var recommended: Bool?
     var items: [HGFeedItem]?
 
     enum CodingKeys: String, CodingKey {
-        case ok, q, count, items
-        case totalIndexed = "total_indexed"
+        case ok, q, count, total, recommended, items
+        case totalPages = "total_pages"
+        case hasMore = "has_more"
     }
 }
 
 extension HGServerClient {
-    func search(_ query: String) async throws -> HGSearchResponse {
+    func search(_ query: String, page: Int = 1) async throws -> HGSearchResponse {
         guard let base = config.normalized else { throw HGServeError.notConfigured }
         var baseStr = base.absoluteString
         while baseStr.hasSuffix("/") { baseStr.removeLast() }
@@ -222,6 +226,7 @@ extension HGServerClient {
             throw HGServeError.badPath("/api/search")
         }
         var items = [URLQueryItem(name: "q", value: query)]
+        if page > 1 { items.append(URLQueryItem(name: "page", value: String(page))) }
         if !config.token.isEmpty {
             items.append(URLQueryItem(name: "token", value: config.token))
         }
@@ -229,7 +234,7 @@ extension HGServerClient {
         guard let url = comps.url else { throw HGServeError.badPath("/api/search") }
 
         var req = URLRequest(url: url)
-        req.timeoutInterval = 90   // 首次建索引要十几秒
+        req.timeoutInterval = 30
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         if !config.token.isEmpty {
             req.setValue(config.token, forHTTPHeaderField: "X-Auth-Token")
