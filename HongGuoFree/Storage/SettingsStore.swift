@@ -15,6 +15,7 @@ final class SettingsStore: ObservableObject {
         static let resolverBaseURL = "app.resolverBaseURL"
         static let resolverToken = "app.resolverToken"
         static let directMode = "app.directMode"
+        static let directModeVer = "app.directModeVer"
     }
 
     private let defaults = UserDefaults.standard
@@ -62,7 +63,16 @@ final class SettingsStore: ObservableObject {
         preferQuality = defaults.string(forKey: Key.preferQuality) ?? "自动"
         resolverBaseURL = defaults.string(forKey: Key.resolverBaseURL) ?? ""
         resolverToken = defaults.string(forKey: Key.resolverToken) ?? ""
-        directMode = defaults.object(forKey: Key.directMode) as? Bool ?? true
+        // 直连实现有大改时递增这个版本号，强制重开直连，
+        // 避免用户之前点过「改用转发」导致新版本永远走转发。
+        let currentVer = 2
+        let savedVer = defaults.integer(forKey: Key.directModeVer)
+        if savedVer < currentVer {
+            directMode = true
+            defaults.set(currentVer, forKey: Key.directModeVer)
+        } else {
+            directMode = defaults.object(forKey: Key.directMode) as? Bool ?? true
+        }
 
         bindPersistence()
     }

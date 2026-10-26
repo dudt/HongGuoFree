@@ -984,7 +984,6 @@ final class PlayerController: ObservableObject {
     }
 
     /// 直连模式：本地起 HTTP 服务，AVPlayer 走标准 http://127.0.0.1
-    private var localServer: LocalStreamServer?
     private let cache = EpisodeCache()
     /// 直连失败时回调，让上层回退到转发模式
     var onDirectFailed: ((String) -> Void)?
@@ -995,9 +994,7 @@ final class PlayerController: ObservableObject {
                     bundle: HGKeyBundle,
                     startAt: Double = 0,
                     rate: Float = 1.0) async {
-        stopLocalServer()
-
-        // 1) 整集下载 + 解密到本地文件（有进度）
+        // 整集下载 + 解密到本地文件（有进度）
         let fileURL: URL
         do {
             fileURL = try await cache.prepare(vid: vid, bundle: bundle) { p in
@@ -1010,30 +1007,13 @@ final class PlayerController: ObservableObject {
             return
         }
 
-        // 2) 本地 HTTP 服务提供播放（数据全在本地，不会超时）
-        let server = LocalStreamServer()
-        do {
-            let port = try await server.start(fileURL: fileURL)
-            localServer = server
-            guard let url = URL(string: "http://127.0.0.1:\(port)/stream.mp4") else {
-                onDirectFailed?("本地流地址无效")
-                return
-            }
-            onPrepareProgress?(1.0, "")
-            load(url: url, startAt: startAt, rate: rate)
-        } catch {
-            onDirectFailed?("本地服务启动失败：\(error.localizedDescription)")
-        }
+        // 直接播本地文件。AVPlayer 对 file:// 支持最完善，
+        // 不需要本地 HTTP 服务（之前那套是多余的复杂度）。
+        onPrepareProgress?(1.0, "")
+        load(url: fileURL, startAt: startAt, rate: rate)
     }
 
-    func directLog() -> [String] {
-        localServer?.recentLog() ?? []
-    }
-
-    private func stopLocalServer() {
-        localServer?.stop()
-        localServer = nil
-    }
+    func directLog() -> [String] { [] }
 
     func load(url: URL, startAt: Double = 0, rate: Float = 1.0) {
         removeItemObservers()
@@ -1129,7 +1109,6 @@ final class PlayerController: ObservableObject {
         removeItemObservers()
         player.pause()
         player.replaceCurrentItem(with: nil)
-        stopLocalServer()
     }
 }
 
