@@ -731,7 +731,7 @@ struct ResolverPlayerView: View {
             if settings.directMode {
                 // 直连：只取密钥，视频走 CDN
                 if let bundle = try? await client.keys(vid: ep.vid) {
-                    controller.loadDirect(bundle: bundle, startAt: resume, rate: rate)
+                    await controller.loadDirect(bundle: bundle, startAt: resume, rate: rate)
                 } else {
                     // 回退到转发
                     let url = try client.streamURL(vid: ep.vid)
@@ -892,27 +892,35 @@ final class PlayerController: ObservableObject {
         }
     }
 
-    /// 直连模式：用自定义 scheme + resourceLoader 本地解密
-    private var loaderDelegate: CENCResourceLoader?
+    /// 直连模式：本地起 HTTP 服务，AVPlayer 走标准 http://127.0.0.1
+    private var localServer: LocalStreamServer?
 
-    func loadDirect(bundle: HGKeyBundle, startAt: Double = 0, rate: Float = 1.0) {
+    func loadDirect(bundle: HGKeyBundle, startAt: Double = 0,
+                    rate: Float = 1.0) async {
         guard let decryptor = CENCDecryptor(bundle: bundle),
               let cdn = bundle.cdnURL, let cdnURL = URL(string: cdn) else {
             onFail?("直连解密初始化失败")
             return
         }
-        let assetURL = CENCResourceLoader.makeAssetURL()
-        let asset = AVURLAsset(url: assetURL)
-        let loader = CENCResourceLoader(decryptor: decryptor, cdnURL: cdnURL)
-        loaderDelegate = loader
-        asset.resourceLoader.setDelegate(loader, queue: DispatchQueue(label: "hg.loader"))
 
-        removeItemObservers()
-        pendingSeek = startAt
-        let item = AVPlayerItem(asset: asset)
-        item.preferredForwardBufferDuration = 8
-        installObservers(item: item, rate: rate)
-        player.replaceCurrentItem(with: item)
+        stopLocalServer()
+        let server = LocalStreamServer(decryptor: decryptor, cdnURL: cdnURL)
+        do {
+            let port = try await server.start()
+            localServer = server
+            guard let url = URL(string: "http://127.0.0.1:\(port)/stream.mp4") else {
+                onFail?("本地流地址无效")
+                return
+            }
+            load(url: url, startAt: startAt, rate: rate)
+        } catch {
+            onFail?("本地流服务启动失败：\(error.localizedDescription)")
+        }
+    }
+
+    private func stopLocalServer() {
+        localServer?.stop()
+        localServer = nil
     }
 
     func load(url: URL, startAt: Double = 0, rate: Float = 1.0) {
@@ -1009,6 +1017,7 @@ final class PlayerController: ObservableObject {
         removeItemObservers()
         player.pause()
         player.replaceCurrentItem(with: nil)
+        stopLocalServer()
     }
 }
 
