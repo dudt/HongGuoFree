@@ -1,20 +1,52 @@
-// 播放器（自定义 UI，单一手势层）
+// 播放器（稳定版）
 //
-// 上一版点击失效的根因：多个手势识别器叠在一起互相抢占
-//   （onTapGesture + onLongPressGesture + DragGesture + UIKit 桥接）。
+// 三个症状的根因与修法：
 //
-// 本版原则：整个播放区只有一个 DragGesture(minimumDistance: 0)。
-// 所有交互都由它在 onChanged/onEnded 里按「位移 + 时长」判定：
-//   位移 < 8pt 且时长 < 0.25s   → 单击（切换控制层）
-//   位移 < 8pt 且时长 < 0.28s 的第二次 → 双击（左退/右进 10s）
-//   位移 < 12pt 且时长 ≥ 0.3s   → 长按（2 倍速，松手恢复）
-//   横向位移 > 14pt             → 拖动进度
-//   纵向位移 > 14pt             → 左侧亮度 / 右侧音量
-// 因为只有一个识别器，不存在抢占。
+// 1. 没声音
+//    从未调用 AVAudioSession.setCategory(.playback)。
+//    iOS 默认 .ambient，会被静音拨片静音、也不支持后台。
+//    → PlaybackAudioSession.activate() 在播放前调用。
+//
+// 2. 黑屏
+//    AVPlayerLayer 挂在 SwiftUI 的 UIViewRepresentable 里，
+//    在 fullScreenCover + ignoresSafeArea 组合下偶尔拿不到正确 bounds。
+//    → 改用 UIViewControllerRepresentable，在 viewDidLayoutSubviews
+//      里显式同步 playerLayer.frame，并监听 readyToPlay 再 play()。
+//
+// 3. 点不动
+//    多个手势识别器叠加互相抢占。
+//    → 单一 DragGesture + 显式状态机；控制层用 overlay 且自身可点。
 import SwiftUI
 import AVKit
 import AVFoundation
 import MediaPlayer
+
+// MARK: - 音频会话
+
+enum PlaybackAudioSession {
+    private static var activated = false
+
+    /// 必须在播放前调用，否则静音拨片会静音、也无法后台播放
+    static func activate() {
+        guard !activated else { return }
+        activated = true
+        let s = AVAudioSession.sharedInstance()
+        do {
+            try s.setCategory(.playback, mode: .moviePlayback,
+                              options: [.allowAirPlay, .allowBluetoothA2DP])
+            try s.setActive(true)
+        } catch {
+            // 失败不阻断播放
+        }
+    }
+
+    static func deactivate() {
+        guard activated else { return }
+        activated = false
+        try? AVAudioSession.sharedInstance().setActive(false,
+            options: [.notifyOthersOnDeactivation])
+    }
+}
 
 // MARK: - 清晰度
 
@@ -45,11 +77,11 @@ struct ResolverPlayerView: View {
     @State private var errorText: String?
 
     // 播放
-    @State private var player = AVPlayer()
-    @State private var isPlaying = false
+    @State private var controller = PlayerController()
     @State private var progress: Double = 0
     @State private var duration: Double = 0
     @State private var bufferedEnd: Double = 0
+    @State private var isPlaying = false
     @State private var rate: Float = 1.0
     @State private var lastSavedSecond = -1
 
@@ -63,38 +95,23 @@ struct ResolverPlayerView: View {
     @State private var showQuality = false
     @State private var showDanmakuSettings = false
 
-    // 手势状态（全部由单一 DragGesture 驱动）
+    // 手势状态机
     @State private var touchStart: Date = .distantPast
-    @State private var touchStartPoint: CGPoint = .zero
-    @State private var lastTapTime: Date = .distantPast
+    @State private var lastTap: Date = .distantPast
     @State private var lastTapX: CGFloat = 0
-    @State private var mode: TouchMode = .undecided
-    @State private var dragStartProgress: Double = 0
-    @State private var scrubTarget: Double = 0
-    @State private var brightnessBase: CGFloat = 0.5
-    @State private var volumeBase: CGFloat = 0.5
-    @State private var longPressFired = false
+    @State private var gestureMode: GMode = .idle
+    @State private var seekBase: Double = 0
+    @State private var seekTarget: Double = 0
+    @State private var brightBase: CGFloat = 0.5
+    @State private var volBase: CGFloat = 0.5
+    @State private var boosted = false
     @State private var rateBeforeBoost: Float = 1.0
 
     // HUD
-    @State private var hudText: String?
-    @State private var hudIcon: String?
+    @State private var hud: (text: String, icon: String?)?
     @State private var hudTask: Task<Void, Never>?
 
-    private enum TouchMode {
-        case undecided
-        case seeking        // 横向拖动
-        case brightness     // 纵向左侧
-        case volume         // 纵向右侧
-        case longPressing   // 长按中
-        case ignored        // 已判定为无效（比如拖动后）
-    }
-
-    // 观察器
-    @State private var timeObserver: Any?
-    @State private var statusObs: NSKeyValueObservation?
-    @State private var bufferObs: NSKeyValueObservation?
-    @State private var endObserver: NSObjectProtocol?
+    private enum GMode { case idle, seeking, brightness, volume, boosting, done }
 
     private var client: HGServerClient { HGServerClient(config: settings.resolverConfig) }
 
@@ -102,30 +119,29 @@ struct ResolverPlayerView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            // 视频 + 弹幕
-            PlayerSurface(player: player).ignoresSafeArea()
-            DanmakuCanvas(engine: danmaku, player: player)
+            // 视频层
+            VideoLayer(player: controller.player)
+                .ignoresSafeArea()
+
+            // 弹幕层
+            DanmakuCanvas(engine: danmaku, player: controller.player)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
 
-            // 唯一手势层
-            touchLayer
+            // 手势层（唯一识别器）
+            gestureLayer
 
-            // 控制层（自身可点，不吃手势层的触摸）
+            // 控制层
             if controlsVisible {
-                controlsLayer
-                    .transition(.opacity)
+                controlsLayer.transition(.opacity)
             }
 
-            // HUD
-            if let hudText {
-                hudView(hudText)
-                    .allowsHitTesting(false)
+            if let hud {
+                hudView(hud.text, icon: hud.icon).allowsHitTesting(false)
             }
 
             if loading {
-                ProgressView().tint(.white).scaleEffect(1.4)
-                    .allowsHitTesting(false)
+                ProgressView().tint(.white).scaleEffect(1.4).allowsHitTesting(false)
             }
 
             if let errorText {
@@ -134,142 +150,130 @@ struct ResolverPlayerView: View {
         }
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
+        .onAppear { PlaybackAudioSession.activate() }
         .task { await loadDetail() }
         .sheet(isPresented: $showEpisodes) { episodeSheet }
         .sheet(isPresented: $showQuality) { qualitySheet }
         .sheet(isPresented: $showDanmakuSettings) { danmakuSettingsSheet }
-        .onDisappear { teardown() }
+        .onDisappear {
+            teardown()
+            PlaybackAudioSession.deactivate()
+        }
     }
 
-    // MARK: - 单一手势层
+    // MARK: - 手势（单一识别器）
 
-    private var touchLayer: some View {
+    private var gestureLayer: some View {
         GeometryReader { geo in
             Color.clear
                 .contentShape(Rectangle())
                 .gesture(
-                    DragGesture(minimumDistance: 0, coordinateSpace: .local)
-                        .onChanged { v in onTouchChanged(v, in: geo.size) }
-                        .onEnded { v in onTouchEnded(v, in: geo.size) }
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { v in handleTouch(v, in: geo.size) }
+                        .onEnded { v in endTouch(v, in: geo.size) }
                 )
         }
     }
 
-    private func onTouchChanged(_ v: DragGesture.Value, in size: CGSize) {
-        if mode == .undecided {
-            let dx = v.translation.width
-            let dy = v.translation.height
-            let dist = max(abs(dx), abs(dy))
+    private func handleTouch(_ v: DragGesture.Value, in size: CGSize) {
+        let dx = v.translation.width
+        let dy = v.translation.height
+        let dist = max(abs(dx), abs(dy))
 
+        if gestureMode == .idle {
             if dist > 14 {
-                // 判定方向
                 if abs(dx) > abs(dy) {
-                    mode = .seeking
-                    dragStartProgress = progress
-                    scrubTarget = progress
+                    gestureMode = .seeking
+                    seekBase = progress
+                    seekTarget = progress
                     showHud(fmt(progress), icon: "arrow.left.and.right")
+                } else if v.startLocation.x < size.width / 2 {
+                    gestureMode = .brightness
+                    brightBase = UIScreen.main.brightness
                 } else {
-                    if v.startLocation.x < size.width / 2 {
-                        mode = .brightness
-                        brightnessBase = UIScreen.main.brightness
-                    } else {
-                        mode = .volume
-                        volumeBase = CGFloat(AVAudioSession.sharedInstance().outputVolume)
-                    }
+                    gestureMode = .volume
+                    volBase = CGFloat(AVAudioSession.sharedInstance().outputVolume)
                 }
+            } else if Date().timeIntervalSince(touchStart) >= 0.35, !boosted {
+                boosted = true
+                gestureMode = .boosting
+                rateBeforeBoost = rate
+                controller.setRate(2.0)
+                showHud("2x 倍速", icon: "forward.fill", sticky: true)
             }
             return
         }
 
-        switch mode {
+        switch gestureMode {
         case .seeking:
-            // 每 10pt = 1 秒
-            let delta = Double(v.translation.width) / 10.0
-            let t = min(max(dragStartProgress + delta, 0), max(duration, 1))
-            scrubTarget = t
+            let delta = Double(dx) / 10.0
+            let t = min(max(seekBase + delta, 0), max(duration, 1))
+            seekTarget = t
             progress = t
             showHud("\(fmt(t)) / \(fmt(duration))", icon: "arrow.left.and.right")
 
         case .brightness:
-            let delta = -Double(v.translation.height) / Double(size.height)
-            let b = min(max(Double(brightnessBase) + delta, 0.02), 1.0)
+            let delta = -Double(dy) / Double(size.height)
+            let b = min(max(Double(brightBase) + delta, 0.02), 1.0)
             UIScreen.main.brightness = CGFloat(b)
             showHud("\(Int(b * 100))%", icon: "sun.max.fill")
 
         case .volume:
-            let delta = -Double(v.translation.height) / Double(size.height)
-            let target = min(max(Double(volumeBase) + delta, 0.0), 1.0)
-            setSystemVolume(Float(target))
-            showHud("\(Int(target * 100))%", icon: "speaker.wave.3.fill")
+            let delta = -Double(dy) / Double(size.height)
+            let t = min(max(Double(volBase) + delta, 0), 1)
+            setSystemVolume(Float(t))
+            showHud("\(Int(t * 100))%", icon: "speaker.wave.3.fill")
 
-        case .undecided:
-            // 位移还很小，检查是否该触发长按
-            if Date().timeIntervalSince(touchStart) >= 0.32, !longPressFired {
-                longPressFired = true
-                mode = .longPressing
-                rateBeforeBoost = rate
-                player.rate = 2.0
-                showHud("2x 倍速", icon: "forward.fill", sticky: true)
-            }
-
-        case .longPressing, .ignored:
+        default:
             break
         }
     }
 
-    private func onTouchEnded(_ v: DragGesture.Value, in size: CGSize) {
+    private func endTouch(_ v: DragGesture.Value, in size: CGSize) {
         let dist = max(abs(v.translation.width), abs(v.translation.height))
         let elapsed = Date().timeIntervalSince(touchStart)
 
-        switch mode {
+        switch gestureMode {
         case .seeking:
-            player.seek(to: CMTime(seconds: scrubTarget, preferredTimescale: 600),
-                        toleranceBefore: .zero, toleranceAfter: .zero)
-            progress = scrubTarget
+            controller.seek(to: seekTarget)
+            progress = seekTarget
             hideHudSoon()
 
         case .brightness, .volume:
             hideHudSoon()
 
-        case .longPressing:
-            player.rate = rateBeforeBoost
-            hideHudSoon(immediately: false)
+        case .boosting:
+            controller.setRate(rateBeforeBoost)
+            hideHudSoon()
 
-        case .ignored:
-            break
-
-        case .undecided:
-            // 没有明显位移 → 点击类
-            if dist < 12, elapsed < 0.32 {
+        case .idle:
+            if dist < 12, elapsed < 0.35 {
                 let now = Date()
-                let isDouble = now.timeIntervalSince(lastTapTime) < 0.30
-                if isDouble, abs(v.startLocation.x - lastTapX) < 60 {
-                    // 双击
-                    lastTapTime = .distantPast
+                if now.timeIntervalSince(lastTap) < 0.30,
+                   abs(v.startLocation.x - lastTapX) < 70 {
+                    lastTap = .distantPast
                     if v.startLocation.x < size.width / 2 {
-                        skip(-10)
-                        showHud("« 10秒", icon: "gobackward.10")
+                        skip(-10); showHud("« 10秒", icon: "gobackward.10")
                     } else {
-                        skip(10)
-                        showHud("10秒 »", icon: "goforward.10")
+                        skip(10); showHud("10秒 »", icon: "goforward.10")
                     }
                 } else {
-                    // 单击
-                    lastTapTime = now
+                    lastTap = now
                     lastTapX = v.startLocation.x
                     toggleControls()
                 }
             }
+
+        default:
+            break
         }
 
-        // 复位
-        mode = .undecided
-        longPressFired = false
+        gestureMode = .idle
+        boosted = false
     }
 
     private func setSystemVolume(_ v: Float) {
-        let mpv = MPVolumeView()
-        mpv.frame = CGRect(x: -1000, y: -1000, width: 1, height: 1)
+        let mpv = MPVolumeView(frame: CGRect(x: -2000, y: -2000, width: 1, height: 1))
         for sub in mpv.subviews where sub is UISlider {
             (sub as? UISlider)?.value = v
             break
@@ -280,34 +284,29 @@ struct ResolverPlayerView: View {
 
     private func showHud(_ text: String, icon: String?, sticky: Bool = false) {
         hudTask?.cancel()
-        hudText = text
-        hudIcon = icon
+        hud = (text, icon)
         if !sticky { hideHudSoon() }
     }
 
-    private func hideHudSoon(immediately: Bool = true) {
+    private func hideHudSoon() {
         hudTask?.cancel()
-        let delay: UInt64 = immediately ? 550_000_000 : 250_000_000
         hudTask = Task {
-            try? await Task.sleep(nanoseconds: delay)
+            try? await Task.sleep(nanoseconds: 600_000_000)
             guard !Task.isCancelled else { return }
-            await MainActor.run { hudText = nil; hudIcon = nil }
+            await MainActor.run { hud = nil }
         }
     }
 
-    private func hudView(_ text: String) -> some View {
+    private func hudView(_ text: String, icon: String?) -> some View {
         VStack(spacing: 6) {
-            if let hudIcon {
-                Image(systemName: hudIcon)
-                    .font(.system(size: 28))
-                    .foregroundStyle(.white)
+            if let icon {
+                Image(systemName: icon).font(.system(size: 26)).foregroundStyle(.white)
             }
             Text(text)
                 .font(.system(size: 14, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.white)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 20).padding(.vertical, 14)
         .background(.black.opacity(0.62))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
@@ -330,8 +329,8 @@ struct ResolverPlayerView: View {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(.black.opacity(0.42))
+                    .frame(width: 38, height: 38)
+                    .background(.black.opacity(0.45))
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
@@ -339,12 +338,10 @@ struct ResolverPlayerView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(seriesTitle)
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
+                    .foregroundStyle(.white).lineLimit(1)
                 if let c = current {
                     Text("第 \(c.index) 集 / 共 \(detail?.totalEpisodes ?? 0) 集")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.65))
+                        .font(.system(size: 11)).foregroundStyle(.white.opacity(0.65))
                 }
             }
             Spacer()
@@ -352,26 +349,19 @@ struct ResolverPlayerView: View {
             if let v = currentVariant {
                 Button { showQuality = true } label: {
                     Text(v.label)
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
-                        .background(.black.opacity(0.42))
-                        .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
+                        .font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                        .padding(.horizontal, 9).padding(.vertical, 5)
+                        .background(.black.opacity(0.45)).clipShape(Capsule())
+                }.buttonStyle(.plain)
             }
 
             Button { danmaku.settings.enabled.toggle() } label: {
-                Image(systemName: danmaku.settings.enabled
-                      ? "text.bubble.fill" : "text.bubble")
+                Image(systemName: danmaku.settings.enabled ? "text.bubble.fill" : "text.bubble")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(danmaku.settings.enabled ? .white : .white.opacity(0.45))
-                    .frame(width: 36, height: 36)
-                    .background(.black.opacity(0.42))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
+                    .frame(width: 38, height: 38)
+                    .background(.black.opacity(0.45)).clipShape(Circle())
+            }.buttonStyle(.plain)
 
             Menu {
                 Button { showDanmakuSettings = true } label: {
@@ -384,8 +374,7 @@ struct ResolverPlayerView: View {
                 ForEach([Float(0.75), 1.0, 1.25, 1.5, 2.0], id: \.self) { r in
                     Button { setRate(r) } label: {
                         Label(r == 1.0 ? "正常速度" : "\(r)x",
-                              systemImage: abs(rate - r) < 0.01
-                                ? "checkmark" : "speedometer")
+                              systemImage: abs(rate - r) < 0.01 ? "checkmark" : "speedometer")
                     }
                 }
                 Divider()
@@ -395,56 +384,41 @@ struct ResolverPlayerView: View {
                                    title: detail?.title ?? seriesTitle,
                                    cover: detail?.cover, intro: nil, tags: nil,
                                    episodeText: nil, episodeCount: detail?.totalEpisodes,
-                                   freeEpisodes: nil, playCount: nil, followedCount: nil)
-                    )
+                                   freeEpisodes: nil, playCount: nil, followedCount: nil))
                 } label: {
                     Label(library.isFavorite(seriesID) ? "取消收藏" : "收藏",
-                          systemImage: library.isFavorite(seriesID)
-                            ? "bookmark.slash" : "bookmark")
+                          systemImage: library.isFavorite(seriesID) ? "bookmark.slash" : "bookmark")
                 }
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(.black.opacity(0.42))
-                    .clipShape(Circle())
+                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(.black.opacity(0.45)).clipShape(Circle())
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 28)
-        .background(
-            LinearGradient(colors: [.black.opacity(0.72), .clear],
-                           startPoint: .top, endPoint: .bottom)
-        )
+        .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 28)
+        .background(LinearGradient(colors: [.black.opacity(0.72), .clear],
+                                   startPoint: .top, endPoint: .bottom))
     }
 
     private var centerRow: some View {
-        HStack(spacing: 48) {
+        HStack(spacing: 50) {
             Button { skip(-15) } label: {
                 Image(systemName: "gobackward.15")
-                    .font(.system(size: 30, weight: .light))
-                    .foregroundStyle(.white)
-            }
-            .buttonStyle(.plain)
+                    .font(.system(size: 30, weight: .light)).foregroundStyle(.white)
+            }.buttonStyle(.plain)
 
             Button { togglePlay() } label: {
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 32))
-                    .foregroundStyle(.white)
-                    .frame(width: 66, height: 66)
-                    .background(.black.opacity(0.32))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
+                    .font(.system(size: 32)).foregroundStyle(.white)
+                    .frame(width: 68, height: 68)
+                    .background(.black.opacity(0.32)).clipShape(Circle())
+            }.buttonStyle(.plain)
 
             Button { skip(15) } label: {
                 Image(systemName: "goforward.15")
-                    .font(.system(size: 30, weight: .light))
-                    .foregroundStyle(.white)
-            }
-            .buttonStyle(.plain)
+                    .font(.system(size: 30, weight: .light)).foregroundStyle(.white)
+            }.buttonStyle(.plain)
         }
     }
 
@@ -453,8 +427,7 @@ struct ResolverPlayerView: View {
             HStack(spacing: 10) {
                 Text(fmt(progress))
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white)
-                    .frame(width: 46, alignment: .leading)
+                    .foregroundStyle(.white).frame(width: 46, alignment: .leading)
 
                 GeometryReader { g in
                     let w = g.size.width
@@ -470,25 +443,32 @@ struct ResolverPlayerView: View {
                     }
                     .frame(height: 18)
                     .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { v in
+                                let ratio = min(max(v.location.x / w, 0), 1)
+                                progress = Double(ratio) * total
+                            }
+                            .onEnded { _ in
+                                controller.seek(to: progress)
+                                scheduleHideControls()
+                            }
+                    )
                 }
                 .frame(height: 18)
 
                 Text(fmt(duration))
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.7))
-                    .frame(width: 46, alignment: .trailing)
+                    .foregroundStyle(.white.opacity(0.7)).frame(width: 46, alignment: .trailing)
             }
 
             HStack(spacing: 14) {
                 Button { setRate(rate >= 2.0 ? 1.0 : rate + 0.25) } label: {
                     Text(rate == 1.0 ? "倍速" : String(format: "%.2gx", rate))
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.white)
                         .padding(.horizontal, 9).padding(.vertical, 5)
-                        .background(.white.opacity(0.16))
-                        .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
+                        .background(.white.opacity(0.16)).clipShape(Capsule())
+                }.buttonStyle(.plain)
 
                 Button { showEpisodes = true } label: {
                     HStack(spacing: 3) {
@@ -497,26 +477,19 @@ struct ResolverPlayerView: View {
                     }
                     .foregroundStyle(.white)
                     .padding(.horizontal, 9).padding(.vertical, 5)
-                    .background(.white.opacity(0.16))
-                    .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
+                    .background(.white.opacity(0.16)).clipShape(Capsule())
+                }.buttonStyle(.plain)
 
                 if danmaku.total > 0 {
                     Text("弹幕 \(danmaku.total)")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .font(.system(size: 10)).foregroundStyle(.white.opacity(0.5))
                 }
                 Spacer()
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.bottom, 20)
-        .padding(.top, 30)
-        .background(
-            LinearGradient(colors: [.clear, .black.opacity(0.78)],
-                           startPoint: .top, endPoint: .bottom)
-        )
+        .padding(.horizontal, 14).padding(.bottom, 20).padding(.top, 30)
+        .background(LinearGradient(colors: [.clear, .black.opacity(0.78)],
+                                   startPoint: .top, endPoint: .bottom))
     }
 
     // MARK: - 错误
@@ -534,8 +507,7 @@ struct ResolverPlayerView: View {
                 .background(Palette.accent).foregroundStyle(.white)
                 .clipShape(Capsule()).buttonStyle(.plain)
         }
-        .padding(20)
-        .background(.black.opacity(0.75))
+        .padding(20).background(.black.opacity(0.75))
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
@@ -555,21 +527,16 @@ struct ResolverPlayerView: View {
                             } label: {
                                 Text("\(ep.index)")
                                     .font(.system(size: 13, weight: .medium))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 10)
-                                    .background(current?.vid == ep.vid
-                                                ? Palette.accent : Palette.surface)
-                                    .foregroundStyle(current?.vid == ep.vid
-                                                     ? .white : Palette.textPrimary)
+                                    .frame(maxWidth: .infinity).padding(.vertical, 10)
+                                    .background(current?.vid == ep.vid ? Palette.accent : Palette.surface)
+                                    .foregroundStyle(current?.vid == ep.vid ? .white : Palette.textPrimary)
                                     .clipShape(RoundedRectangle(cornerRadius: 8))
-                            }
-                            .buttonStyle(.plain)
+                            }.buttonStyle(.plain)
                         }
                     }.padding(16)
                 }
             }
-            .navigationTitle("选集")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("选集").navigationBarTitleDisplayMode(.inline)
         }
     }
 
@@ -588,22 +555,19 @@ struct ResolverPlayerView: View {
                                     Text(v.label).font(.system(size: 14, weight: .medium))
                                     Spacer()
                                     if currentVariant?.vid == v.vid {
-                                        Image(systemName: "checkmark")
-                                            .foregroundStyle(Palette.accent)
+                                        Image(systemName: "checkmark").foregroundStyle(Palette.accent)
                                     }
                                 }
                                 .foregroundStyle(Palette.textPrimary)
                                 .padding(.horizontal, 14).padding(.vertical, 12)
                                 .background(Palette.surface)
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
-                            }
-                            .buttonStyle(.plain)
+                            }.buttonStyle(.plain)
                         }
                     }.padding(16)
                 }
             }
-            .navigationTitle("清晰度")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("清晰度").navigationBarTitleDisplayMode(.inline)
         }
     }
 
@@ -631,21 +595,16 @@ struct ResolverPlayerView: View {
                                 Text(danmaku.loading ? "拉取中…" : "重新拉取弹幕")
                             }
                             .font(.system(size: 14, weight: .semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(Palette.surface)
-                            .foregroundStyle(Palette.textPrimary)
+                            .frame(maxWidth: .infinity).padding(.vertical, 12)
+                            .background(Palette.surface).foregroundStyle(Palette.textPrimary)
                             .clipShape(RoundedRectangle(cornerRadius: 10))
-                        }
-                        .buttonStyle(.plain)
+                        }.buttonStyle(.plain)
                         Text("共 \(danmaku.total) 条")
                             .font(.system(size: 11)).foregroundStyle(Palette.textTertiary)
-                    }
-                    .padding(16)
+                    }.padding(16)
                 }
             }
-            .navigationTitle("弹幕设置")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("弹幕设置").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("完成") { showDanmakuSettings = false }
@@ -693,8 +652,7 @@ struct ResolverPlayerView: View {
 
             let resumeEp = library.record(for: seriesID)?.lastEpisode ?? startIndex
             let target = eps.first(where: { $0.index == resumeEp })
-                ?? eps.first(where: { $0.index == startIndex })
-                ?? eps[0]
+                ?? eps.first(where: { $0.index == startIndex }) ?? eps[0]
             await playEpisode(target)
         } catch {
             errorText = error.localizedDescription
@@ -710,32 +668,37 @@ struct ResolverPlayerView: View {
             let url = try client.streamURL(vid: ep.vid)
             await loadVariants(for: ep)
 
-            removeObservers()
-            let item = AVPlayerItem(url: url)
-            item.preferredForwardBufferDuration = 8
-            observe(item: item)
-            player.replaceCurrentItem(with: item)
-            player.automaticallyWaitsToMinimizeStalling = true
             current = ep
             duration = 0
             progress = 0
             bufferedEnd = 0
             lastSavedSecond = -1
-            player.rate = rate
 
+            PlaybackAudioSession.activate()
+            controller.onTime = { t, d in
+                if gestureMode != .seeking { progress = t }
+                if d > 0 { duration = d }
+                if let e = current, Int(t) % 5 == 0, Int(t) != lastSavedSecond {
+                    lastSavedSecond = Int(t)
+                    library.saveProgress(seriesID: seriesID, episode: e.index,
+                                         position: t, duration: d)
+                }
+            }
+            controller.onBuffer = { bufferedEnd = $0 }
+            controller.onEnd = { Task { await playNext() } }
+            controller.onFail = { errorText = $0 }
+            controller.onState = { playing in
+                isPlaying = playing
+            }
+
+            var resume: Double = 0
             if let rec = library.record(for: seriesID),
                rec.lastEpisode == ep.index,
                let pos = rec.position, pos > 3 {
-                await player.seek(to: CMTime(seconds: pos, preferredTimescale: 600),
-                                  toleranceBefore: .zero, toleranceAfter: .zero)
-                progress = pos
+                resume = pos
             }
 
-            player.play()
-            isPlaying = true
-            installTimeObserver()
-            installEndObserver()
-            scheduleHideControls()
+            controller.load(url: url, startAt: resume, rate: rate)
 
             if let d = detail {
                 library.touchHistory(
@@ -744,12 +707,12 @@ struct ResolverPlayerView: View {
                                intro: nil, tags: nil, episodeText: nil,
                                episodeCount: d.totalEpisodes, freeEpisodes: nil,
                                playCount: nil, followedCount: nil),
-                    episode: ep.index
-                )
+                    episode: ep.index)
             }
 
             danmaku.clear()
             Task { await loadDanmaku(for: ep) }
+            scheduleHideControls()
         } catch {
             errorText = error.localizedDescription
         }
@@ -768,9 +731,7 @@ struct ResolverPlayerView: View {
             let page = try await client.danmaku(vid: ep.vid, seriesID: seriesID)
             danmaku.load(page.items ?? [])
             danmaku.rebuild(laneCount: 10)
-        } catch {
-            // 静默
-        }
+        } catch {}
     }
 
     private func loadVariants(for ep: HGServerEpisode) async {
@@ -786,104 +747,30 @@ struct ResolverPlayerView: View {
     }
 
     private func switchQuality(_ v: HGVariant) async {
-        let t = player.currentTime().seconds
+        let t = progress
         let wasPlaying = isPlaying
-        let item = AVPlayerItem(url: v.url)
-        item.preferredForwardBufferDuration = 8
-        observe(item: item)
-        player.replaceCurrentItem(with: item)
         currentVariant = v
-        if let e = endObserver { NotificationCenter.default.removeObserver(e) }
-        endObserver = nil
-        installEndObserver()
-        if t.isFinite, t > 0 {
-            await player.seek(to: CMTime(seconds: t, preferredTimescale: 600),
-                              toleranceBefore: .zero, toleranceAfter: .zero)
-        }
-        if wasPlaying { player.play() }
-    }
-
-    // MARK: - 观察
-
-    private func observe(item: AVPlayerItem) {
-        statusObs?.invalidate()
-        statusObs = item.observe(\.status, options: [.initial, .new]) { obj, _ in
-            Task { @MainActor in
-                switch obj.status {
-                case .readyToPlay:
-                    let d = obj.duration.seconds
-                    if d.isFinite, d > 0 { duration = d }
-                case .failed:
-                    errorText = "播放失败：\(obj.error?.localizedDescription ?? "未知")"
-                default: break
-                }
-            }
-        }
-        bufferObs?.invalidate()
-        bufferObs = item.observe(\.loadedTimeRanges, options: [.new]) { obj, _ in
-            Task { @MainActor in
-                if let r = obj.loadedTimeRanges.last?.timeRangeValue {
-                    bufferedEnd = (r.start + r.duration).seconds
-                }
-            }
-        }
-    }
-
-    private func installTimeObserver() {
-        guard timeObserver == nil else { return }
-        timeObserver = player.addPeriodicTimeObserver(
-            forInterval: CMTime(seconds: 0.2, preferredTimescale: 600),
-            queue: .main
-        ) { t in
-            let s = t.seconds
-            if s.isFinite, mode != .seeking { progress = s }
-            let d = player.currentItem?.duration.seconds ?? 0
-            if d.isFinite, d > 0 { duration = d }
-
-            if let ep = current, Int(s) % 5 == 0, Int(s) != lastSavedSecond {
-                lastSavedSecond = Int(s)
-                library.saveProgress(seriesID: seriesID, episode: ep.index,
-                                     position: s, duration: d)
-            }
-        }
-    }
-
-    private func installEndObserver() {
-        guard let item = player.currentItem, endObserver == nil else { return }
-        endObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
-        ) { _ in
-            Task { await playNext() }
-        }
-    }
-
-    private func removeObservers() {
-        if let t = timeObserver { player.removeTimeObserver(t) }
-        timeObserver = nil
-        statusObs?.invalidate(); statusObs = nil
-        bufferObs?.invalidate(); bufferObs = nil
-        if let e = endObserver { NotificationCenter.default.removeObserver(e) }
-        endObserver = nil
+        controller.load(url: v.url, startAt: t, rate: rate)
+        if !wasPlaying { controller.pause() }
     }
 
     // MARK: - 控制
 
     private func togglePlay() {
-        if isPlaying { player.pause() } else { player.play() }
-        isPlaying.toggle()
+        controller.togglePlay()
+        isPlaying = controller.isPlaying
         scheduleHideControls()
     }
 
-    private func skip(_ seconds: Double) {
-        let target = min(max(player.currentTime().seconds + seconds, 0), max(duration, 1))
-        player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
-                    toleranceBefore: .zero, toleranceAfter: .zero)
-        progress = target
+    private func skip(_ s: Double) {
+        let t = min(max(progress + s, 0), max(duration, 1))
+        controller.seek(to: t)
+        progress = t
     }
 
     private func setRate(_ r: Float) {
         rate = r
-        if mode != .longPressing { player.rate = r }
+        if gestureMode != .boosting { controller.setRate(r) }
     }
 
     private func toggleControls() {
@@ -905,8 +792,7 @@ struct ResolverPlayerView: View {
     }
 
     private func playNext() async {
-        guard let d = detail, let c = current,
-              let eps = d.episodes,
+        guard let d = detail, let c = current, let eps = d.episodes,
               let i = eps.firstIndex(where: { $0.vid == c.vid }),
               i + 1 < eps.count else { return }
         await playEpisode(eps[i + 1])
@@ -915,39 +801,188 @@ struct ResolverPlayerView: View {
     private func teardown() {
         hideTask?.cancel()
         hudTask?.cancel()
-        removeObservers()
-        player.pause()
+        controller.teardown()
     }
 
-    private func fmt(_ sec: Double) -> String {
-        guard sec.isFinite, sec >= 0 else { return "00:00" }
-        let s = Int(sec)
-        let h = s / 3600, m = (s % 3600) / 60, ss = s % 60
+    private func fmt(_ s: Double) -> String {
+        guard s.isFinite, s >= 0 else { return "00:00" }
+        let i = Int(s), h = i / 3600, m = (i % 3600) / 60, ss = i % 60
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, ss)
                      : String(format: "%02d:%02d", m, ss)
     }
 }
 
-// MARK: - 视频层
+// MARK: - 播放控制器（AVPlayer 封装）
 
-private struct PlayerSurface: UIViewRepresentable {
-    let player: AVPlayer
-    func makeUIView(context: Context) -> PlayerUIView {
-        let v = PlayerUIView()
-        v.backgroundColor = .black
-        v.attach(player)
-        return v
+@MainActor
+final class PlayerController: ObservableObject {
+    let player = AVPlayer()
+
+    var onTime: ((Double, Double) -> Void)?
+    var onBuffer: ((Double) -> Void)?
+    var onEnd: (() -> Void)?
+    var onFail: ((String) -> Void)?
+    var onState: ((Bool) -> Void)?
+
+    private(set) var isPlaying = false
+    private var timeObs: Any?
+    private var statusObs: NSKeyValueObservation?
+    private var bufferObs: NSKeyValueObservation?
+    private var endObs: NSObjectProtocol?
+    private var pendingSeek: Double = 0
+
+    init() {
+        player.actionAtItemEnd = .pause
+        installTimeObserver()
     }
-    func updateUIView(_ uiView: PlayerUIView, context: Context) {
-        uiView.attach(player)
+
+    private func installTimeObserver() {
+        timeObs = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
+            queue: .main
+        ) { [weak self] t in
+            guard let self else { return }
+            let s = t.seconds
+            guard s.isFinite else { return }
+            let d = self.player.currentItem?.duration.seconds ?? 0
+            self.onTime?(s, d.isFinite ? d : 0)
+        }
+    }
+
+    func load(url: URL, startAt: Double = 0, rate: Float = 1.0) {
+        removeItemObservers()
+        pendingSeek = startAt
+
+        let item = AVPlayerItem(url: url)
+        item.preferredForwardBufferDuration = 8
+        item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
+
+        statusObs = item.observe(\.status, options: [.initial, .new]) { [weak self] obj, _ in
+            Task { @MainActor in
+                guard let self else { return }
+                switch obj.status {
+                case .readyToPlay:
+                    // 关键：等 readyToPlay 之后再 seek + play，否则黑屏
+                    if self.pendingSeek > 0.1 {
+                        await self.player.seek(to: CMTime(seconds: self.pendingSeek,
+                                                          preferredTimescale: 600),
+                                               toleranceBefore: .zero,
+                                               toleranceAfter: .zero)
+                        self.pendingSeek = 0
+                    }
+                    self.player.play()
+                    self.player.rate = rate
+                    self.isPlaying = true
+                    self.onState?(true)
+                case .failed:
+                    self.onFail?(obj.error?.localizedDescription ?? "播放失败")
+                default:
+                    break
+                }
+            }
+        }
+
+        bufferObs = item.observe(\.loadedTimeRanges, options: [.new]) { [weak self] obj, _ in
+            Task { @MainActor in
+                if let r = obj.loadedTimeRanges.last?.timeRangeValue {
+                    self?.onBuffer?((r.start + r.duration).seconds)
+                }
+            }
+        }
+
+        endObs = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.isPlaying = false
+                self?.onState?(false)
+                self?.onEnd?()
+            }
+        }
+
+        player.replaceCurrentItem(with: item)
+    }
+
+    func togglePlay() {
+        if isPlaying { pause() } else { play() }
+    }
+
+    func play() {
+        player.play()
+        isPlaying = true
+        onState?(true)
+    }
+
+    func pause() {
+        player.pause()
+        isPlaying = false
+        onState?(false)
+    }
+
+    func seek(to t: Double) {
+        player.seek(to: CMTime(seconds: t, preferredTimescale: 600),
+                    toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    func setRate(_ r: Float) {
+        player.rate = r
+    }
+
+    private func removeItemObservers() {
+        statusObs?.invalidate(); statusObs = nil
+        bufferObs?.invalidate(); bufferObs = nil
+        if let e = endObs { NotificationCenter.default.removeObserver(e) }
+        endObs = nil
+    }
+
+    func teardown() {
+        if let t = timeObs { player.removeTimeObserver(t) }
+        timeObs = nil
+        removeItemObservers()
+        player.pause()
+        player.replaceCurrentItem(with: nil)
     }
 }
 
-final class PlayerUIView: UIView {
-    override static var layerClass: AnyClass { AVPlayerLayer.self }
-    private var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
-    func attach(_ player: AVPlayer) {
-        playerLayer.player = player
+// MARK: - 视频层（UIViewController，显式同步 frame）
+
+struct VideoLayer: UIViewControllerRepresentable {
+    let player: AVPlayer
+
+    func makeUIViewController(context: Context) -> VideoHostController {
+        let c = VideoHostController()
+        c.attach(player)
+        return c
+    }
+
+    func updateUIViewController(_ c: VideoHostController, context: Context) {
+        c.attach(player)
+    }
+}
+
+final class VideoHostController: UIViewController {
+    private let playerLayer = AVPlayerLayer()
+    private weak var currentPlayer: AVPlayer?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
         playerLayer.videoGravity = .resizeAspect
+        view.layer.addSublayer(playerLayer)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        playerLayer.frame = view.bounds
+        CATransaction.commit()
+    }
+
+    func attach(_ player: AVPlayer) {
+        guard currentPlayer !== player else { return }
+        currentPlayer = player
+        playerLayer.player = player
+        playerLayer.setNeedsLayout()
     }
 }
