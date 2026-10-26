@@ -146,6 +146,26 @@ struct SettingsView: View {
                         .foregroundStyle(Palette.textTertiary)
                 }
 
+                Divider().overlay(Palette.textTertiary.opacity(0.15)).padding(.vertical, 2)
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("直连模式")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Palette.textPrimary)
+                        Text(settings.directMode
+                             ? "视频走 CDN，服务器只发密钥（省 146 倍带宽）"
+                             : "视频经服务器转发（服务器上传 = 观看码率之和）")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Palette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    Toggle("", isOn: $settings.directMode)
+                        .labelsHidden()
+                        .tint(Palette.accent)
+                }
+
                 Text("部署：node server/hongguo-server.mjs（默认 :8787）。同一局域网填内网 IP；公网建议 HTTPS + ACCESS_TOKEN。")
                     .font(.system(size: 11))
                     .foregroundStyle(Palette.textTertiary)

@@ -106,6 +106,7 @@ struct ResolverPlayerView: View {
     @State private var volBase: CGFloat = 0.5
     @State private var boosted = false
     @State private var rateBeforeBoost: Float = 1.0
+    @State private var longPressTask: Task<Void, Never>?
 
     // HUD
     @State private var hud: (text: String, icon: String?)?
@@ -180,8 +181,16 @@ struct ResolverPlayerView: View {
         let dy = v.translation.height
         let dist = max(abs(dx), abs(dy))
 
+        // 第一次回调：记录起点时间，启动长按计时
+        if gestureMode == .idle, touchStart == .distantPast {
+            touchStart = Date()
+            startLongPressTimer()
+        }
+
         if gestureMode == .idle {
             if dist > 14 {
+                // 有明显位移 → 取消长按，判定方向
+                cancelLongPressTimer()
                 if abs(dx) > abs(dy) {
                     gestureMode = .seeking
                     seekBase = progress
@@ -194,12 +203,6 @@ struct ResolverPlayerView: View {
                     gestureMode = .volume
                     volBase = CGFloat(AVAudioSession.sharedInstance().outputVolume)
                 }
-            } else if Date().timeIntervalSince(touchStart) >= 0.35, !boosted {
-                boosted = true
-                gestureMode = .boosting
-                rateBeforeBoost = rate
-                controller.setRate(2.0)
-                showHud("2x 倍速", icon: "forward.fill", sticky: true)
             }
             return
         }
@@ -229,9 +232,33 @@ struct ResolverPlayerView: View {
         }
     }
 
+    /// 长按计时器：0.5 秒内没有明显位移且没松手 → 进入 2 倍速
+    private func startLongPressTimer() {
+        longPressTask?.cancel()
+        longPressTask = Task {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                // 只有还在 idle（没位移、没松手）才触发
+                guard gestureMode == .idle, !boosted else { return }
+                boosted = true
+                gestureMode = .boosting
+                rateBeforeBoost = rate
+                controller.setRate(2.0)
+                showHud("2x 倍速", icon: "forward.fill", sticky: true)
+            }
+        }
+    }
+
+    private func cancelLongPressTimer() {
+        longPressTask?.cancel()
+        longPressTask = nil
+    }
+
     private func endTouch(_ v: DragGesture.Value, in size: CGSize) {
         let dist = max(abs(v.translation.width), abs(v.translation.height))
-        let elapsed = Date().timeIntervalSince(touchStart)
+        let elapsed = touchStart == .distantPast ? 0 : Date().timeIntervalSince(touchStart)
+        cancelLongPressTimer()
 
         switch gestureMode {
         case .seeking:
@@ -247,10 +274,12 @@ struct ResolverPlayerView: View {
             hideHudSoon()
 
         case .idle:
-            if dist < 12, elapsed < 0.35 {
+            // 没有位移、没有长按 → 点击类
+            if dist < 12, elapsed < 0.5, !boosted {
                 let now = Date()
-                if now.timeIntervalSince(lastTap) < 0.30,
-                   abs(v.startLocation.x - lastTapX) < 70 {
+                if now.timeIntervalSince(lastTap) < 0.32,
+                   abs(v.startLocation.x - lastTapX) < 80 {
+                    // 双击
                     lastTap = .distantPast
                     if v.startLocation.x < size.width / 2 {
                         skip(-10); showHud("« 10秒", icon: "gobackward.10")
@@ -258,6 +287,7 @@ struct ResolverPlayerView: View {
                         skip(10); showHud("10秒 »", icon: "goforward.10")
                     }
                 } else {
+                    // 单击
                     lastTap = now
                     lastTapX = v.startLocation.x
                     toggleControls()
@@ -270,6 +300,7 @@ struct ResolverPlayerView: View {
 
         gestureMode = .idle
         boosted = false
+        touchStart = .distantPast
     }
 
     private func setSystemVolume(_ v: Float) {
@@ -665,7 +696,6 @@ struct ResolverPlayerView: View {
         defer { loading = false }
 
         do {
-            let url = try client.streamURL(vid: ep.vid)
             await loadVariants(for: ep)
 
             current = ep
@@ -698,7 +728,19 @@ struct ResolverPlayerView: View {
                 resume = pos
             }
 
-            controller.load(url: url, startAt: resume, rate: rate)
+            if settings.directMode {
+                // 直连：只取密钥，视频走 CDN
+                if let bundle = try? await client.keys(vid: ep.vid) {
+                    controller.loadDirect(bundle: bundle, startAt: resume, rate: rate)
+                } else {
+                    // 回退到转发
+                    let url = try client.streamURL(vid: ep.vid)
+                    controller.load(url: url, startAt: resume, rate: rate)
+                }
+            } else {
+                let url = try client.streamURL(vid: ep.vid)
+                controller.load(url: url, startAt: resume, rate: rate)
+            }
 
             if let d = detail {
                 library.touchHistory(
@@ -801,6 +843,7 @@ struct ResolverPlayerView: View {
     private func teardown() {
         hideTask?.cancel()
         hudTask?.cancel()
+        cancelLongPressTimer()
         controller.teardown()
     }
 
@@ -849,6 +892,29 @@ final class PlayerController: ObservableObject {
         }
     }
 
+    /// 直连模式：用自定义 scheme + resourceLoader 本地解密
+    private var loaderDelegate: CENCResourceLoader?
+
+    func loadDirect(bundle: HGKeyBundle, startAt: Double = 0, rate: Float = 1.0) {
+        guard let decryptor = CENCDecryptor(bundle: bundle),
+              let cdn = bundle.cdnURL, let cdnURL = URL(string: cdn) else {
+            onFail?("直连解密初始化失败")
+            return
+        }
+        let assetURL = CENCResourceLoader.makeAssetURL()
+        let asset = AVURLAsset(url: assetURL)
+        let loader = CENCResourceLoader(decryptor: decryptor, cdnURL: cdnURL)
+        loaderDelegate = loader
+        asset.resourceLoader.setDelegate(loader, queue: DispatchQueue(label: "hg.loader"))
+
+        removeItemObservers()
+        pendingSeek = startAt
+        let item = AVPlayerItem(asset: asset)
+        item.preferredForwardBufferDuration = 8
+        installObservers(item: item, rate: rate)
+        player.replaceCurrentItem(with: item)
+    }
+
     func load(url: URL, startAt: Double = 0, rate: Float = 1.0) {
         removeItemObservers()
         pendingSeek = startAt
@@ -856,7 +922,11 @@ final class PlayerController: ObservableObject {
         let item = AVPlayerItem(url: url)
         item.preferredForwardBufferDuration = 8
         item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
+        installObservers(item: item, rate: rate)
+        player.replaceCurrentItem(with: item)
+    }
 
+    private func installObservers(item: AVPlayerItem, rate: Float) {
         statusObs = item.observe(\.status, options: [.initial, .new]) { [weak self] obj, _ in
             Task { @MainActor in
                 guard let self else { return }
@@ -899,8 +969,6 @@ final class PlayerController: ObservableObject {
                 self?.onEnd?()
             }
         }
-
-        player.replaceCurrentItem(with: item)
     }
 
     func togglePlay() {

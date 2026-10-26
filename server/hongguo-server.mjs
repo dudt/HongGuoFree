@@ -23,6 +23,7 @@
  */
 import http from "node:http";
 import crypto from "node:crypto";
+import zlib from "node:zlib";
 import { URL } from "node:url";
 import { signHeaders, setSignDevice } from "./sign.mjs";
 
@@ -46,7 +47,7 @@ const WEB_UA =
 const SEG_SIZE = 32 * 1024 * 1024;
 
 // 版本号：解密/头部处理逻辑有改动就 +1
-const SERVER_VERSION = "7";
+const SERVER_VERSION = "8";
 
 // ---------------------------------------------------------------- 工具
 
@@ -215,7 +216,23 @@ function deriveContentKey(value) {
 
 // ---------------------------------------------------------------- App 接口
 
-async function requestVideoModel(vid) {
+async function requestVideoModel(vid, tries = 3) {
+  let lastErr = null;
+  for (let i = 0; i < tries; i += 1) {
+    try {
+      return await requestVideoModelOnce(vid);
+    } catch (e) {
+      lastErr = e;
+      const msg = String(e.message || "");
+      // 空响应 / 网络错误 才重试
+      if (!/HTTP 200|timeout|ECONN|socket|aborted/i.test(msg)) throw e;
+      await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
+async function requestVideoModelOnce(vid) {
   const dev = freshDevice();
   const url = `${API_HOST}${MODEL_PATH}?${qs(dev)}`;
   const payload = JSON.stringify({
@@ -1000,8 +1017,29 @@ function send(res, status, body, headers = {}) {
   res.end(payload);
 }
 
-function sendJSON(res, status, obj) {
-  send(res, status, JSON.stringify(obj), { "Content-Type": "application/json; charset=utf-8" });
+function sendJSON(res, status, obj, req = null) {
+  const body = Buffer.from(JSON.stringify(obj));
+  // 大于 1KB 且客户端支持 gzip 时压缩（样本表能有 30~60 倍压缩率）
+  const accept = req ? String(req.headers["accept-encoding"] || "") : "";
+  if (body.length > 1024 && accept.includes("gzip")) {
+    try {
+      const gz = zlib.gzipSync(body, { level: 6 });
+      if (gz.length < body.length) {
+        res.writeHead(status, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Content-Encoding": "gzip",
+          "Content-Length": gz.length,
+          "Access-Control-Allow-Origin": "*",
+          Vary: "Accept-Encoding",
+        });
+        res.end(gz);
+        return;
+      }
+    } catch {
+      /* 压缩失败就用原文 */
+    }
+  }
+  send(res, status, body, { "Content-Type": "application/json; charset=utf-8" });
 }
 
 function authorized(req, url) {
@@ -1279,6 +1317,66 @@ const server = http.createServer(async (req, res) => {
       };
       danmakuCache.set(allKey, { time: Date.now(), value: payload });
       sendJSON(res, 200, payload);
+      return;
+    }
+
+    // --- 直连模式：只给 CDN 地址 + 解密密钥，不转发视频流
+    //
+    // 带宽说明：
+    //   /api/stream 会把整个视频从 CDN 拉过来再转发给客户端，
+    //   服务器上传带宽 = 所有用户观看码率之和。
+    //   /api/keys 只返回几百字节的元数据，视频由客户端直连 CDN，
+    //   服务器带宽几乎为零。
+    if (path === "/api/keys") {
+      const vid = seen(url.searchParams.get("vid"));
+      if (!vid) return sendJSON(res, 400, { ok: false, error: "缺少 vid" });
+
+      const s = await resolveStream(vid);
+
+      // 客户端要自己解 CENC，需要每样本的 IV。
+      // 体积优化：
+      //   - 样本大小用差分 varint 编码（多数样本大小接近）
+      //   - IV 只有 8 字节有效，用 base64 打包成一条长串
+      //   - header 用 base64
+      // 这样一集大约 100~200 KB，比转发 6 MB 小 30~60 倍。
+      let samplesPacked = null;
+      if (s.prepared && s.prepared.samples && s.prepared.samples.length) {
+        const sizes = [];
+        const ivs = [];
+        let prevEnd = 0;
+        for (const x of s.prepared.samples) {
+          sizes.push(x.end - x.start);
+          prevEnd = x.end;
+          // CENC IV 前 8 字节有效，后 8 字节是 0
+          ivs.push(Buffer.from(x.iv).subarray(0, 8));
+        }
+        samplesPacked = {
+          count: sizes.length,
+          // 样本大小：逗号分隔的十进制，gzip 后压缩率很高
+          sizes: sizes.join(","),
+          // IV：连续 8 字节 × count，整体 base64
+          ivs: Buffer.concat(ivs).toString("base64"),
+        };
+      }
+
+      let header = null;
+      if (s.prepared && s.prepared.header) {
+        header = Buffer.from(s.prepared.header).toString("base64");
+      }
+
+      sendJSON(res, 200, {
+        ok: true,
+        vid: s.vid,
+        mode: "direct",
+        cdn_url: s.url,
+        quality: s.quality,
+        duration: s.duration,
+        total_bytes: s.total,
+        encrypted: s.encrypted,
+        key_hex: s.key ? Buffer.from(s.key).toString("hex") : null,
+        header_b64: header,
+        samples: samplesPacked,
+      }, req);
       return;
     }
 

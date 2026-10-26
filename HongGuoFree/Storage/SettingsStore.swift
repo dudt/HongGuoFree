@@ -14,6 +14,7 @@ final class SettingsStore: ObservableObject {
         static let preferQuality = "app.preferQuality"
         static let resolverBaseURL = "app.resolverBaseURL"
         static let resolverToken = "app.resolverToken"
+        static let directMode = "app.directMode"
     }
 
     private let defaults = UserDefaults.standard
@@ -29,6 +30,9 @@ final class SettingsStore: ObservableObject {
     @Published var resolverBaseURL: String
     /// 服务端 ACCESS_TOKEN（可选）
     @Published var resolverToken: String
+
+    /// 直连模式：视频流走 CDN，服务器只给密钥（省 146 倍带宽）
+    @Published var directMode: Bool
 
     /// 组装好的解析服务配置
     var resolverConfig: ResolverConfig {
@@ -46,7 +50,8 @@ final class SettingsStore: ObservableObject {
             Key.playbackRate: 1.0,
             Key.preferQuality: "自动",
             Key.resolverBaseURL: "",
-            Key.resolverToken: ""
+            Key.resolverToken: "",
+            Key.directMode: true
         ])
 
         let storedRate = defaults.double(forKey: Key.playbackRate)
@@ -57,6 +62,7 @@ final class SettingsStore: ObservableObject {
         preferQuality = defaults.string(forKey: Key.preferQuality) ?? "自动"
         resolverBaseURL = defaults.string(forKey: Key.resolverBaseURL) ?? ""
         resolverToken = defaults.string(forKey: Key.resolverToken) ?? ""
+        directMode = defaults.object(forKey: Key.directMode) as? Bool ?? true
 
         bindPersistence()
     }
@@ -83,6 +89,9 @@ final class SettingsStore: ObservableObject {
             .store(in: &bag)
         $resolverToken
             .sink { [weak self] in self?.defaults.set($0, forKey: Key.resolverToken) }
+            .store(in: &bag)
+        $directMode
+            .sink { [weak self] in self?.defaults.set($0, forKey: Key.directMode) }
             .store(in: &bag)
     }
 }
