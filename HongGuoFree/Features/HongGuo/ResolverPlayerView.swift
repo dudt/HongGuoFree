@@ -73,6 +73,9 @@ struct ResolverPlayerView: View {
     @State private var brightness: CGFloat = 0.5
     @State private var volume: CGFloat = 0.5
     @State private var hudKind: HudKind = .none
+    @State private var isLongPressing = false
+    @State private var rateBeforeLongPress: Float = 1.0
+    @State private var longPressTask: Task<Void, Never>?
 
     private enum DragAxis { case none, horizontal, vertical }
     private enum HudKind { case none, seek, brightness, volume }
@@ -128,21 +131,40 @@ struct ResolverPlayerView: View {
 
     private var gestureLayer: some View {
         GeometryReader { geo in
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) { loc in
-                    if loc.x < geo.size.width / 2 {
-                        skip(-10); showHud("« 10秒", .seek)
-                    } else {
-                        skip(10); showHud("10秒 »", .seek)
+            ZStack {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) { loc in
+                        guard !isLongPressing else { return }
+                        if loc.x < geo.size.width / 2 {
+                            skip(-10); showHud("« 10秒", .seek)
+                        } else {
+                            skip(10); showHud("10秒 »", .seek)
+                        }
                     }
-                }
-                .onTapGesture { toggleControls() }
-                .gesture(
-                    DragGesture(minimumDistance: 14)
-                        .onChanged { v in handleDrag(v, in: geo.size) }
-                        .onEnded { v in endDrag(v, in: geo.size) }
+                    .onTapGesture {
+                        guard !isLongPressing else { return }
+                        toggleControls()
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 14)
+                            .onChanged { v in
+                                guard !isLongPressing else { return }
+                                handleDrag(v, in: geo.size)
+                            }
+                            .onEnded { v in
+                                guard !isLongPressing else { return }
+                                endDrag(v, in: geo.size)
+                            }
+                    )
+
+                // 长按桥接放最上层，但透明且不拦 tap/drag
+                LongPressBridge(
+                    onBegan: { beginLongPressBoost() },
+                    onEnded: { endLongPressBoost() }
                 )
+                .allowsHitTesting(true)
+            }
         }
     }
 
@@ -871,6 +893,31 @@ struct ResolverPlayerView: View {
 
     // MARK: - 控制
 
+    /// 长按临时 2 倍速
+    private func beginLongPressBoost() {
+        guard player != nil, isPlaying else { return }
+        // 双击/拖动期间不触发
+        guard dragAxis == .none, !isDraggingSeek else { return }
+        isLongPressing = true
+        rateBeforeLongPress = rate
+        player?.rate = 2.0
+        showHud("2x 倍速中", .seek)
+        // 长按期间不自动隐藏 HUD
+        hudTask?.cancel()
+    }
+
+    private func endLongPressBoost() {
+        guard isLongPressing else { return }
+        isLongPressing = false
+        player?.rate = rateBeforeLongPress
+        hudTask?.cancel()
+        hudTask = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { hudText = nil; hudKind = .none }
+        }
+    }
+
     private func togglePlay() {
         guard let p = player else { return }
         if isPlaying { p.pause() } else { p.play() }
@@ -888,7 +935,8 @@ struct ResolverPlayerView: View {
 
     private func setRate(_ r: Float) {
         rate = r
-        player?.rate = r
+        // 长按期间不打断 2 倍速
+        if !isLongPressing { player?.rate = r }
     }
 
     private func toggleControls() {
@@ -931,6 +979,71 @@ struct ResolverPlayerView: View {
         let h = s / 3600, m = (s % 3600) / 60, ss = s % 60
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, ss)
                      : String(format: "%02d:%02d", m, ss)
+    }
+}
+
+
+// MARK: - 长按桥接
+
+/// UIKit 长按识别器：比 SwiftUI 的 onLongPressGesture 更可靠，
+/// 不会和 tap / drag 抢手势。用于「长按 2 倍速」。
+struct LongPressBridge: UIViewRepresentable {
+    var minimumDuration: TimeInterval = 0.3
+    var onBegan: () -> Void
+    var onEnded: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onBegan: onBegan, onEnded: onEnded)
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let v = UIView()
+        v.backgroundColor = .clear
+        let press = UILongPressGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handle(_:))
+        )
+        press.minimumPressDuration = minimumDuration
+        press.allowableMovement = 24
+        press.cancelsTouchesInView = false
+        press.delaysTouchesBegan = false
+        v.addGestureRecognizer(press)
+        context.coordinator.view = v
+        return v
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.onBegan = onBegan
+        context.coordinator.onEnded = onEnded
+    }
+
+    final class Coordinator: NSObject {
+        var onBegan: () -> Void
+        var onEnded: () -> Void
+        weak var view: UIView?
+        private var active = false
+
+        init(onBegan: @escaping () -> Void, onEnded: @escaping () -> Void) {
+            self.onBegan = onBegan
+            self.onEnded = onEnded
+        }
+
+        @objc func handle(_ g: UILongPressGestureRecognizer) {
+            switch g.state {
+            case .began:
+                if !active {
+                    active = true
+                    onBegan()
+                }
+            case .ended, .cancelled, .failed:
+                if active {
+                    active = false
+                    onEnded()
+                }
+            default:
+                break
+            }
+        }
     }
 }
 

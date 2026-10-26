@@ -883,6 +883,31 @@ async function mallFeed(tabType = 201, offset = 0, want = 20) {
   return { items: out, nextOffset: cursor, exhausted: out.length < want };
 }
 
+/** 只解转义，不做 URL 处理（用于标题/简介） */
+function unescapeText(v) {
+  let s = seen(v);
+  if (!s) return "";
+  s = s.replace(/\\u002F/gi, "/").replace(/\\u0026/gi, "&");
+  s = s.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  s = s.replace(/\\/g, "");
+  return s.trim();
+}
+
+/** 清洗上游返回的 URL：转义的 \u002F、双反斜杠、HTML 实体 */
+function cleanUpstreamUrl(v) {
+  let s = seen(v);
+  if (!s) return "";
+  // JSON 里被转义的斜杠
+  s = s.replace(/\\u002F/gi, "/").replace(/\\\//g, "/");
+  s = s.replace(/\\u0026/gi, "&").replace(/&amp;/g, "&");
+  s = s.replace(/\\u003D/gi, "=").replace(/\\u003F/gi, "?");
+  // 去掉多余的转义反斜杠
+  s = s.replace(/\\/g, "");
+  // 协议补全
+  if (s.startsWith("//")) s = "https:" + s;
+  return s.trim();
+}
+
 /** 专辑详情（App 端 album_detail，album_id 必须是字符串） */
 async function albumDetail(seriesId) {
   const dev = freshDevice();
@@ -912,7 +937,7 @@ async function discover(tabType, offset, count) {
       const base = { ...it };
       if (ad) {
         base.title = it.title || seen(ad.title);
-        base.cover = seen(ad.cover);
+        base.cover = cleanUpstreamUrl(ad.cover);
         base.intro = seen(ad.intro);
         base.playCount = Number(ad.play_cnt || 0);
         base.followedCount = Number(ad.followed_cnt || 0);
@@ -921,7 +946,7 @@ async function discover(tabType, offset, count) {
       if (sv) {
         base.episodeCount = sv.vids.length;
         base.freeEpisodes = sv.free;
-        if (!base.cover) base.cover = sv.cover;
+        if (!base.cover) base.cover = cleanUpstreamUrl(sv.cover);
         if (!base.title) base.title = sv.title;
       }
       return base;
@@ -949,7 +974,15 @@ async function seriesVids(seriesId) {
   const cover = (html.match(/"series_cover"\s*:\s*"([^"]*)"/) || [])[1] || "";
   const free = Number((html.match(/"accessible_episode_cnt"\s*:\s*(\d+)/) || [])[1] || 0);
   const total = Number((html.match(/"episode_cnt"\s*:\s*(\d+)/) || [])[1] || vids.length);
-  const value = { seriesId: String(seriesId), title, intro, cover, free, total, vids };
+  const value = {
+    seriesId: String(seriesId),
+    title: unescapeText(title),
+    intro: unescapeText(intro),
+    cover: cleanUpstreamUrl(cover),
+    free,
+    total,
+    vids,
+  };
   infoCache.set(seriesId, { time: Date.now(), value });
   return value;
 }
