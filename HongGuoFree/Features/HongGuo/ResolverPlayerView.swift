@@ -77,6 +77,8 @@ struct ResolverPlayerView: View {
     @State private var errorText: String?
     @State private var directError: String?
     @State private var isDirectPlaying = false
+    @State private var prepareProgress: Double = -1
+    @State private var prepareText: String = ""
 
     // 播放
     @State private var controller = PlayerController()
@@ -145,6 +147,27 @@ struct ResolverPlayerView: View {
 
             if loading {
                 ProgressView().tint(.white).scaleEffect(1.4).allowsHitTesting(false)
+            }
+
+            // 直连准备进度（下载 + 解密整集）
+            if prepareProgress >= 0 {
+                VStack(spacing: 10) {
+                    Text("准备播放")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(.white.opacity(0.22)).frame(width: 180, height: 4)
+                        Capsule().fill(Palette.accent)
+                            .frame(width: 180 * CGFloat(prepareProgress), height: 4)
+                    }
+                    Text(prepareText)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.65))
+                }
+                .padding(.horizontal, 22).padding(.vertical, 16)
+                .background(.black.opacity(0.72))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .allowsHitTesting(false)
             }
 
             if let errorText {
@@ -774,6 +797,14 @@ struct ResolverPlayerView: View {
             controller.onState = { playing in
                 isPlaying = playing
             }
+            controller.onPrepareProgress = { frac, text in
+                prepareProgress = frac >= 1.0 ? -1 : frac
+                prepareText = text
+            }
+            controller.onDirectFailed = { msg in
+                directError = msg
+                prepareProgress = -1
+            }
 
             var resume: Double = 0
             if let rec = library.record(for: seriesID),
@@ -784,11 +815,13 @@ struct ResolverPlayerView: View {
 
             // 先决定用哪种模式；直连失败会在 onDirectFailed 里回退
             isDirectPlaying = false
+            prepareProgress = -1
+            prepareText = ""
             if settings.directMode {
                 do {
                     let bundle = try await client.keys(vid: ep.vid)
                     isDirectPlaying = true
-                    await controller.loadDirect(bundle: bundle,
+                    await controller.loadDirect(vid: ep.vid, bundle: bundle,
                                                 startAt: resume, rate: rate)
                 } catch {
                     directError = error.localizedDescription
@@ -952,26 +985,41 @@ final class PlayerController: ObservableObject {
 
     /// 直连模式：本地起 HTTP 服务，AVPlayer 走标准 http://127.0.0.1
     private var localServer: LocalStreamServer?
+    private let cache = EpisodeCache()
     /// 直连失败时回调，让上层回退到转发模式
     var onDirectFailed: ((String) -> Void)?
+    /// 下载/解密进度（0~1 + 文案）
+    var onPrepareProgress: ((Double, String) -> Void)?
 
-    func loadDirect(bundle: HGKeyBundle, startAt: Double = 0,
+    func loadDirect(vid: String,
+                    bundle: HGKeyBundle,
+                    startAt: Double = 0,
                     rate: Float = 1.0) async {
-        guard let decryptor = CENCDecryptor(bundle: bundle),
-              let cdn = bundle.cdnURL, let cdnURL = URL(string: cdn) else {
-            onDirectFailed?("解密参数无效（key/header/samples 缺失）")
+        stopLocalServer()
+
+        // 1) 整集下载 + 解密到本地文件（有进度）
+        let fileURL: URL
+        do {
+            fileURL = try await cache.prepare(vid: vid, bundle: bundle) { p in
+                Task { @MainActor in
+                    self.onPrepareProgress?(p.fraction, "\(p.phase) \(Int(p.fraction * 100))%")
+                }
+            }
+        } catch {
+            onDirectFailed?(error.localizedDescription)
             return
         }
 
-        stopLocalServer()
-        let server = LocalStreamServer(decryptor: decryptor, cdnURL: cdnURL)
+        // 2) 本地 HTTP 服务提供播放（数据全在本地，不会超时）
+        let server = LocalStreamServer()
         do {
-            let port = try await server.start()
+            let port = try await server.start(fileURL: fileURL)
             localServer = server
             guard let url = URL(string: "http://127.0.0.1:\(port)/stream.mp4") else {
                 onDirectFailed?("本地流地址无效")
                 return
             }
+            onPrepareProgress?(1.0, "")
             load(url: url, startAt: startAt, rate: rate)
         } catch {
             onDirectFailed?("本地服务启动失败：\(error.localizedDescription)")
