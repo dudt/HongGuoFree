@@ -174,11 +174,13 @@ final class CENCDecryptor {
             idx -= 1
         }
 
-        var out = Data(count: data.count)
+        // Swift 独占访问：闭包里不能同时读写 out，用局部变量中转
+        let outCount = data.count
+        var buffer = [UInt8](repeating: 0, count: outCount)
         var moved = 0
         var cryptorRef: CCCryptorRef?
 
-        let status: CCCryptorStatus = out.withUnsafeMutableBytes { outPtr in
+        let status: CCCryptorStatus = buffer.withUnsafeMutableBytes { outPtr in
             guard let outBase = outPtr.baseAddress else { return CCCryptorStatus(kCCParamError) }
             return data.withUnsafeBytes { inPtr in
                 key.withUnsafeBytes { kPtr in
@@ -200,7 +202,7 @@ final class CENCDecryptor {
                         st = CCCryptorUpdate(
                             c,
                             inPtr.baseAddress, data.count,
-                            outBase, out.count, &moved
+                            outBase, outCount, &moved
                         )
                         CCCryptorRelease(c)
                         cryptorRef = nil
@@ -210,7 +212,7 @@ final class CENCDecryptor {
             }
         }
         guard status == kCCSuccess else { return nil }
-        return out
+        return Data(buffer)
     }
 }
 
