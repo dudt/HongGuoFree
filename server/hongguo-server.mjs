@@ -758,6 +758,44 @@ async function fetchDanmaku(vid, seriesId, durationMs, cursor = "", offsetMs = 0
   };
 }
 
+/**
+ * 弹幕窗口串行拉取 + 失败重试。
+ *
+ * 上游对同一 vid 的连续请求有节流：并发或过快会返回 110001。
+ * 所以这里用全局串行队列，每次请求之间留间隔，失败退避重试。
+ */
+let danmakuChain = Promise.resolve();
+const DANMAKU_GAP_MS = 120;
+
+function enqueueDanmaku(task) {
+  const run = danmakuChain.then(async () => {
+    await new Promise((r) => setTimeout(r, DANMAKU_GAP_MS));
+    return task();
+  });
+  // 链不因单次失败而断
+  danmakuChain = run.catch(() => {});
+  return run;
+}
+
+/** 带重试的弹幕请求 */
+async function fetchDanmakuRetry(vid, seriesId, durationMs, cursor, offsetMs, tries = 4) {
+  let lastErr = null;
+  for (let i = 0; i < tries; i += 1) {
+    try {
+      return await enqueueDanmaku(() =>
+        fetchDanmaku(vid, seriesId, durationMs, cursor, offsetMs)
+      );
+    } catch (e) {
+      lastErr = e;
+      const msg = String(e.message || "");
+      // 只有节流类错误才重试
+      if (!/110001|110002|timeout|ECONN/i.test(msg)) break;
+      await new Promise((r) => setTimeout(r, 600 * (i + 1)));
+    }
+  }
+  throw lastErr || new Error("danmaku failed");
+}
+
 /** 预热：提前把解析结果放进缓存（失败忽略） */
 async function warmStream(vid) {
   try {
@@ -1071,39 +1109,101 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // --- 弹幕
+    // --- 弹幕（整集，一次给全）
     if (path === "/api/danmaku") {
       const vid = seen(url.searchParams.get("vid"));
       const seriesId = seen(url.searchParams.get("series_id"));
-      const cursor = url.searchParams.get("cursor") || "";
-      const offsetMs = Number(url.searchParams.get("offset_ms") || 0);
       if (!vid) return sendJSON(res, 400, { ok: false, error: "缺少 vid" });
       if (!seriesId) return sendJSON(res, 400, { ok: false, error: "缺少 series_id" });
 
-      // 需要整集时长（服务端要传给上游）
+      // 单窗口模式（带 cursor 或 offset_ms）
+      const cursor = url.searchParams.get("cursor") || "";
+      const offsetParam = url.searchParams.get("offset_ms");
+      const singleWindow = Boolean(cursor) || offsetParam !== null;
+
       const s = await resolveStream(vid);
       const durationMs = Math.round(Number(s.duration || 0) * 1000);
 
-      const key = `dm:${vid}:${cursor}:${offsetMs}`;
-      const hit = danmakuCache.get(key);
-      let page;
-      if (hit && Date.now() - hit.time < CACHE_TTL) {
-        page = hit.value;
-      } else {
-        page = await fetchDanmaku(vid, seriesId, durationMs, cursor, offsetMs);
-        danmakuCache.set(key, { time: Date.now(), value: page });
+      if (singleWindow) {
+        const offsetMs = Number(offsetParam || 0);
+        const key = `dm:${vid}:${cursor}:${offsetMs}`;
+        const hit = danmakuCache.get(key);
+        let page;
+        if (hit && Date.now() - hit.time < CACHE_TTL) {
+          page = hit.value;
+        } else {
+          page = await fetchDanmakuRetry(vid, seriesId, durationMs, cursor, offsetMs);
+          danmakuCache.set(key, { time: Date.now(), value: page });
+        }
+        sendJSON(res, 200, {
+          ok: true, vid,
+          count: page.items.length,
+          total: page.count,
+          has_more: page.has_more,
+          next_cursor: page.cursor,
+          next_offset_ms: page.next_offset_ms,
+          items: page.items,
+        });
+        return;
       }
 
-      sendJSON(res, 200, {
+      // 整集模式：遍历时间窗，去重排序后一次返回
+      const allKey = `dmall:${vid}`;
+      const hitAll = danmakuCache.get(allKey);
+      if (hitAll && Date.now() - hitAll.time < CACHE_TTL) {
+        sendJSON(res, 200, hitAll.value);
+        return;
+      }
+
+      const totalSec = Math.max(Math.round(durationMs / 1000), 120);
+      const step = 30;
+      const merged = new Map();
+      let reportedTotal = 0;
+      let failures = 0;
+
+      const offsets = [];
+      for (let off = 0; off <= totalSec + step; off += step) offsets.push(off);
+
+      // 每批 4 个窗口并行（上游对同一 vid 有节流，靠 enqueueDanmaku 串行化）
+      const BATCH = 4;
+      for (let i = 0; i < offsets.length; i += BATCH) {
+        const batch = offsets.slice(i, i + BATCH);
+        await Promise.all(batch.map(async (off) => {
+          try {
+            let page = await fetchDanmakuRetry(vid, seriesId, durationMs, "", off * 1000);
+            if (!reportedTotal) reportedTotal = page.count || 0;
+            for (const it of page.items) merged.set(it.id, it);
+
+            let cur = page.cursor || "";
+            let guard = 0;
+            while (page.has_more && cur && guard < 6) {
+              guard += 1;
+              const more = await fetchDanmakuRetry(vid, seriesId, durationMs, cur, off * 1000);
+              for (const it of more.items) merged.set(it.id, it);
+              if (more.cursor === cur) break;
+              cur = more.cursor || "";
+              page = more;
+            }
+          } catch {
+            failures += 1;
+          }
+        }));
+      }
+
+      const items = [...merged.values()].sort((a, b) => a.offset_ms - b.offset_ms);
+      const payload = {
         ok: true,
         vid,
-        count: page.items.length,
-        total: page.count,
-        has_more: page.has_more,
-        next_cursor: page.cursor,
-        next_offset_ms: page.next_offset_ms,
-        items: page.items,
-      });
+        count: items.length,
+        total: Math.max(reportedTotal, items.length),
+        has_more: false,
+        next_cursor: "",
+        next_offset_ms: 0,
+        windows_failed: failures,
+        items,
+      };
+      danmakuCache.set(allKey, { time: Date.now(), value: payload });
+      sendJSON(res, 200, payload);
       return;
     }
 
