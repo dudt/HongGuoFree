@@ -176,32 +176,34 @@ final class CENCDecryptor {
 
         var out = Data(count: data.count)
         var moved = 0
-        let status = out.withUnsafeMutableBytes { outPtr -> CCCryptorStatus in
+        var cryptorRef: CCCryptorRef?
+
+        let status: CCCryptorStatus = out.withUnsafeMutableBytes { outPtr in
             guard let outBase = outPtr.baseAddress else { return CCCryptorStatus(kCCParamError) }
             return data.withUnsafeBytes { inPtr in
                 key.withUnsafeBytes { kPtr in
                     counter.withUnsafeBytes { ivPtr in
-                        guard let cryptor = UnsafeMutablePointer<CCCryptorRef?>(
-                            .allocate(capacity: 1)) else {
-                            return CCCryptorStatus(kCCMemoryFailure)
-                        }
-                        defer { cryptor.deallocate() }
-                        cryptor.pointee = nil
-
                         var st = CCCryptorCreateWithMode(
-                            CCOperation(kCCEncrypt), CCMode(kCCModeCTR),
-                            CCAlgorithm(kCCAlgorithmAES), CCPadding(ccNoPadding),
-                            ivPtr.baseAddress, kPtr.baseAddress, key.count,
+                            CCOperation(kCCEncrypt),
+                            CCMode(kCCModeCTR),
+                            CCAlgorithm(kCCAlgorithmAES),
+                            CCPadding(ccNoPadding),
+                            ivPtr.baseAddress,
+                            kPtr.baseAddress,
+                            key.count,
                             nil, 0, 0,
                             CCModeOptions(kCCModeOptionCTR_BE),
-                            cryptor
+                            &cryptorRef
                         )
-                        guard st == kCCSuccess, let c = cryptor.pointee else { return st }
+                        guard st == kCCSuccess, let c = cryptorRef else { return st }
 
-                        st = CCCryptorUpdate(c,
-                                             inPtr.baseAddress, data.count,
-                                             outBase, out.count, &moved)
+                        st = CCCryptorUpdate(
+                            c,
+                            inPtr.baseAddress, data.count,
+                            outBase, out.count, &moved
+                        )
                         CCCryptorRelease(c)
+                        cryptorRef = nil
                         return st
                     }
                 }
