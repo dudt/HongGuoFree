@@ -808,10 +808,18 @@ async function warmStream(vid) {
 // ---------------------------------------------------------------- 发现页 / 详情
 
 /** App 端短剧商城 feed：只给 series_id/item_id，需要补详情 */
-async function mallFeed(tabType = 201, offset = 0, count = 20) {
+/**
+ * 短剧商城 feed。
+ *
+ * 上游行为（实测）：
+ *   - count 参数被忽略，永远返回 6 张卡
+ *   - offset 步长就是 6，翻到 100 左右就到底
+ * 所以想凑够 20 部必须自己连续翻多页。
+ */
+async function mallFeedPage(tabType, offset) {
   const dev = freshDevice();
   const url = `${API_HOST}/reading/playlet/shortbuy_api/get_mall_playlet_feed/v1/?${qs({
-    ...dev, tab_type: String(tabType), offset: String(offset), count: String(count),
+    ...dev, tab_type: String(tabType), offset: String(offset), count: "20",
   })}`;
   const { status, data } = await fetchText(url, { "User-Agent": APP_UA });
   if (status !== 200) throw new Error(`mall_feed HTTP ${status}`);
@@ -823,7 +831,6 @@ async function mallFeed(tabType = 201, offset = 0, count = 20) {
     const sid = seen(fmap.series_id);
     const iid = seen(fmap.item_id);
     if (!sid) continue;
-    // 顺手从 long_press_action 里挖标题/分类
     const lp = (c.cell_long_press_action || {}).new_long_press_action_card_playlet || [];
     let title = "";
     const tags = [];
@@ -833,10 +840,47 @@ async function mallFeed(tabType = 201, offset = 0, count = 20) {
       else if (it.selection_head === "视频类型") tags.push(seen(it.selection_text));
     }
     const style = c.style || {};
-    const epText = seen(style.episode_list_text);
-    out.push({ seriesId: sid, itemId: iid, title, tags, episodeText: epText });
+    out.push({
+      seriesId: sid,
+      itemId: iid,
+      title,
+      tags,
+      episodeText: seen(style.episode_list_text),
+    });
   }
   return out;
+}
+
+/** 从 offset 开始连续翻页，凑够 want 个不重复的 series */
+async function mallFeed(tabType = 201, offset = 0, want = 20) {
+  const seenIds = new Set();
+  const out = [];
+  let cursor = offset;
+  let emptyRounds = 0;
+
+  // 每次上游只给 6 条，按 6 步进；最多翻 12 页防打爆
+  for (let page = 0; page < 12 && out.length < want; page += 1) {
+    let rows = [];
+    try {
+      rows = await mallFeedPage(tabType, cursor);
+    } catch {
+      rows = [];
+    }
+    if (!rows.length) {
+      emptyRounds += 1;
+      if (emptyRounds >= 2) break;
+      cursor += 6;
+      continue;
+    }
+    emptyRounds = 0;
+    for (const r of rows) {
+      if (seenIds.has(r.seriesId)) continue;
+      seenIds.add(r.seriesId);
+      out.push(r);
+    }
+    cursor += rows.length;
+  }
+  return { items: out, nextOffset: cursor, exhausted: out.length < want };
 }
 
 /** 专辑详情（App 端 album_detail，album_id 必须是字符串） */
@@ -857,15 +901,8 @@ async function albumDetail(seriesId) {
 
 /** 发现页：feed + 并发补详情 */
 async function discover(tabType, offset, count) {
-  const items = await mallFeed(tabType, offset, count);
-  // feed 有时返回重复卡片，按 seriesId 去重
-  const uniq = [];
-  const seenIds = new Set();
-  for (const it of items) {
-    if (seenIds.has(it.seriesId)) continue;
-    seenIds.add(it.seriesId);
-    uniq.push(it);
-  }
+  const feed = await mallFeed(tabType, offset, count);
+  const uniq = feed.items;
   const enriched = await Promise.all(
     uniq.map(async (it) => {
       const [ad, sv] = await Promise.all([
@@ -890,6 +927,8 @@ async function discover(tabType, offset, count) {
       return base;
     })
   );
+  enriched.nextOffset = feed.nextOffset;
+  enriched.exhausted = feed.exhausted;
   return enriched;
 }
 
@@ -1027,12 +1066,15 @@ const server = http.createServer(async (req, res) => {
         items = await discover(tab, offset, count);
         discoverCache.set(key, { time: Date.now(), value: items });
       }
+      const nextOffset = items.nextOffset ?? (offset + items.length);
+      const exhausted = Boolean(items.exhausted);
       sendJSON(res, 200, {
         ok: true,
         tab,
         offset,
+        next_offset: nextOffset,
         count: items.length,
-        has_more: items.length >= 6,
+        has_more: !exhausted,
         items: items.map((it) => ({
           series_id: it.seriesId,
           item_id: it.itemId,

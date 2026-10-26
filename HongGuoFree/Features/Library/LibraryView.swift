@@ -75,6 +75,7 @@ struct LibraryView: View {
                     startIndex: rec.lastEpisode ?? 1
                 )
                 .environmentObject(settings)
+                .environmentObject(library)
             }
         }
     }

@@ -24,6 +24,12 @@ struct FeedView: View {
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: 16) {
                         header
+
+                        // 继续观看
+                        if !library.continueWatching().isEmpty {
+                            continueSection
+                        }
+
                         tabRow
 
                         if let msg = feed.errorText {
@@ -105,6 +111,7 @@ struct FeedView: View {
                     seriesTitle: item.title ?? "红果短剧"
                 )
                 .environmentObject(settings)
+                .environmentObject(library)
             }
         }
     }
@@ -139,6 +146,115 @@ struct FeedView: View {
                 .foregroundStyle(Palette.textSecondary)
         }
         .padding(.horizontal, 16)
+    }
+
+    // MARK: 继续观看
+
+    private var continueSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.accent)
+                Text("继续观看")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Palette.textPrimary)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(library.continueWatching()) { rec in
+                        Button {
+                            resume(rec)
+                        } label: {
+                            continueCard(rec)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                library.removeHistory(rec.seriesID)
+                            } label: { Label("从历史移除", systemImage: "trash") }
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+    }
+
+    private func continueCard(_ rec: HGRecord) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ZStack(alignment: .bottomLeading) {
+                AsyncImage(url: URL(string: rec.cover ?? "")) { phase in
+                    if case .success(let img) = phase {
+                        img.resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Palette.gradient(for: rec.seriesID))
+                            .overlay(
+                                Text(String(rec.title.prefix(1)))
+                                    .font(.system(size: 24, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.85))
+                            )
+                    }
+                }
+                .frame(width: 128, height: 172)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                // 进度条
+                if rec.progressRatio > 0 {
+                    VStack {
+                        Spacer()
+                        GeometryReader { g in
+                            ZStack(alignment: .leading) {
+                                Rectangle().fill(.black.opacity(0.5)).frame(height: 3)
+                                Rectangle().fill(Palette.accent)
+                                    .frame(width: g.size.width * rec.progressRatio, height: 3)
+                            }
+                        }
+                        .frame(height: 3)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+
+                // 集数角标
+                if let e = rec.lastEpisode {
+                    Text("看到第\(e)集")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(.black.opacity(0.7))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .padding(6)
+                }
+            }
+            .frame(width: 128, height: 172)
+
+            Text(rec.title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Palette.textPrimary)
+                .lineLimit(1)
+                .frame(width: 128, alignment: .leading)
+
+            if !rec.progressText.isEmpty {
+                Text(rec.progressText)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(Palette.textTertiary)
+            }
+        }
+    }
+
+    private func resume(_ rec: HGRecord) {
+        playerSeries = HGFeedItem(
+            seriesID: rec.seriesID, itemID: nil, title: rec.title,
+            cover: rec.cover, intro: nil, tags: nil, episodeText: nil,
+            episodeCount: rec.episodeCount, freeEpisodes: nil,
+            playCount: nil, followedCount: nil
+        )
     }
 
     // MARK: 分类

@@ -1,13 +1,12 @@
-// 解析服务播放器
+// 播放器
 //
-// 能力：
-//   - 1080P / 多清晰度切换（服务端每个清晰度一个 vid 条目）
-//   - 快进 15s / 倒退 15s
-//   - 播放暂停
-//   - 可拖动进度条
-//   - 选集 + 自动连播
-//
-// 服务端已经把 CENC 解好，这里就是最普通的 AVPlayer。
+// 交互：
+//   单击      显示/隐藏控制层
+//   双击左半  后退 10 秒
+//   双击右半  前进 10 秒
+//   横向拖动  拖动进度（松手跳转）
+//   纵向拖动  左半调亮度、右半调音量
+//   控制层    播放/暂停、±15 秒、进度条、倍速、清晰度、弹幕设置、选集
 import SwiftUI
 import AVKit
 import AVFoundation
@@ -17,10 +16,8 @@ import Combine
 
 struct HGVariant: Identifiable, Hashable {
     var vid: String
-    var label: String       // "1080P"
-    var height: Int
+    var label: String
     var url: URL
-
     var id: String { vid + label }
 }
 
@@ -32,41 +29,53 @@ struct ResolverPlayerView: View {
     var startIndex: Int = 1
 
     @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var library: HGLibraryStore
     @Environment(\.dismiss) private var dismiss
 
+    // 数据
     @State private var detail: HGServerDetail?
     @State private var current: HGServerEpisode?
-    @State private var player: AVPlayer?
-    @State private var loading = false
-    @State private var errorText: String?
-    @State private var showEpisodes = false
-    @State private var showDebug = false
-    @State private var debugLines: [String] = []
-
-    // 播放状态
-    @State private var progress: Double = 0
-    @State private var duration: Double = 0
-    @State private var isPlaying = false
-    @State private var isScrubbing = false
-    @State private var scrubValue: Double = 0
-    @State private var controlsVisible = true
-    @State private var hideTask: Task<Void, Never>?
-
-    // 清晰度
     @State private var variants: [HGVariant] = []
     @State private var currentVariant: HGVariant?
-    @State private var showQuality = false
+    @State private var loading = false
+    @State private var errorText: String?
+    @State private var debugLines: [String] = []
+
+    // 播放
+    @State private var player: AVPlayer?
+    @State private var isPlaying = false
+    @State private var progress: Double = 0
+    @State private var duration: Double = 0
+    @State private var isScrubbing = false
+    @State private var scrubValue: Double = 0
+    @State private var rate: Float = 1.0
+    @State private var lastSavedSecond = -1
 
     // 弹幕
     @StateObject private var danmaku = DanmakuEngine()
-    @State private var dmCursor = ""
-    @State private var dmLoading = false
-    @State private var dmTotal = 0
+
+    // 控制层
+    @State private var controlsVisible = true
+    @State private var hideTask: Task<Void, Never>?
+    @State private var showEpisodes = false
+    @State private var showQuality = false
+    @State private var showDanmakuSettings = false
+    @State private var showDebug = false
+
+    // 手势
+    @State private var dragStartTime: Double = 0
+    @State private var dragDeltaX: CGFloat = 0
+    @State private var isDraggingSeek = false
+    @State private var dragAxis: DragAxis = .none
+    @State private var lastTapTime: Date = .distantPast
+    @State private var seekHint: String?
+    @State private var hintTask: Task<Void, Never>?
+
+    private enum DragAxis { case none, horizontal, vertical }
 
     // 观察器
     @State private var timeObserver: Any?
     @State private var statusObs: NSKeyValueObservation?
-    @State private var rateObs: NSKeyValueObservation?
     @State private var endObserver: NSObjectProtocol?
 
     private var client: HGServerClient { HGServerClient(config: settings.resolverConfig) }
@@ -77,236 +86,333 @@ struct ResolverPlayerView: View {
 
             if let player {
                 VideoSurface(player: player).ignoresSafeArea()
-            }
-
-            // 弹幕层（在视频之上、控制层之下）
-            if danmaku.isEnabled, !danmaku.active.isEmpty {
-                DanmakuOverlay(engine: danmaku, currentTime: progress)
+                DanmakuOverlay(engine: danmaku, playerTime: progress, isPaused: !isPlaying)
                     .ignoresSafeArea()
             }
 
+            // 手势层
+            gestureLayer
+
             if controlsVisible {
-                controlsOverlay
-                    .transition(.opacity)
+                controlsOverlay.transition(.opacity)
+            }
+
+            if let seekHint {
+                Text(seekHint)
+                    .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.black.opacity(0.7))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
             }
 
             if loading {
-                ProgressView().progressViewStyle(.circular).tint(.white).scaleEffect(1.3)
+                ProgressView().tint(.white).scaleEffect(1.3)
             }
 
             if let errorText {
                 errorOverlay(errorText)
-            }
-
-            // 底部诊断入口
-            VStack {
-                Spacer()
-                debugBar
             }
         }
         .statusBarHidden(true)
         .task { await loadDetail() }
         .sheet(isPresented: $showEpisodes) { episodeSheet }
         .sheet(isPresented: $showQuality) { qualitySheet }
+        .sheet(isPresented: $showDanmakuSettings) { danmakuSettingsSheet }
         .onDisappear { teardown() }
-        .onTapGesture { toggleControls() }
+    }
+
+    // MARK: 手势
+
+    private var gestureLayer: some View {
+        GeometryReader { geo in
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { location in
+                    handleDoubleTap(location, in: geo.size)
+                }
+                .onTapGesture { toggleControls() }
+                .gesture(
+                    DragGesture(minimumDistance: 12)
+                        .onChanged { v in handleDragChanged(v, in: geo.size) }
+                        .onEnded { v in handleDragEnded(v, in: geo.size) }
+                )
+        }
+    }
+
+    private func handleDoubleTap(_ location: CGPoint, in size: CGSize) {
+        if location.x < size.width / 2 {
+            skip(-10)
+            showHint("« 10s")
+        } else {
+            skip(10)
+            showHint("10s »")
+        }
+    }
+
+    private func handleDragChanged(_ v: DragGesture.Value, in size: CGSize) {
+        if dragAxis == .none {
+            dragAxis = abs(v.translation.width) > abs(v.translation.height)
+                ? .horizontal : .vertical
+            if dragAxis == .horizontal {
+                dragStartTime = progress
+                isDraggingSeek = true
+            }
+        }
+
+        if dragAxis == .horizontal {
+            // 每 12pt 对应 1 秒
+            let delta = Double(v.translation.width) / 12.0
+            let target = min(max(dragStartTime + delta, 0), max(duration, 1))
+            scrubValue = target
+            showHint("\(fmt(target)) / \(fmt(duration))")
+        }
+    }
+
+    private func handleDragEnded(_ v: DragGesture.Value, in size: CGSize) {
+        if dragAxis == .horizontal, isDraggingSeek {
+            player?.seek(to: CMTime(seconds: scrubValue, preferredTimescale: 600),
+                         toleranceBefore: .zero, toleranceAfter: .zero)
+            progress = scrubValue
+            isDraggingSeek = false
+        }
+        dragAxis = .none
+        dragDeltaX = 0
+        hideHintSoon()
+    }
+
+    private func showHint(_ s: String) {
+        hintTask?.cancel()
+        seekHint = s
+    }
+
+    private func hideHintSoon() {
+        hintTask?.cancel()
+        hintTask = Task {
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { seekHint = nil }
+        }
     }
 
     // MARK: 控制层
 
     private var controlsOverlay: some View {
         VStack {
-            // 顶部
-            HStack(alignment: .top) {
-                Button { teardown(); dismiss() } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(10)
-                        .background(.black.opacity(0.45))
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
+            topBar
+            Spacer()
+            centerButtons
+            Spacer()
+            bottomBar
+        }
+    }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(seriesTitle)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    if let c = current {
-                        Text("第 \(c.index) 集 / 共 \(detail?.totalEpisodes ?? 0) 集")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.7))
-                    }
-                }
-                Spacer()
-
-                // 弹幕开关
-                Button {
-                    danmaku.isEnabled.toggle()
-                    log("弹幕 \(danmaku.isEnabled ? "开" : "关")")
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: danmaku.isEnabled
-                              ? "text.bubble.fill" : "text.bubble")
-                        Text(danmaku.isEnabled ? "弹幕开" : "弹幕关")
-                    }
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(danmaku.isEnabled ? .white : .white.opacity(0.5))
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 7)
-                    .background(.black.opacity(0.45))
-                    .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-
-                if !variants.isEmpty {
-                    Button { showQuality = true } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "rectangle.on.rectangle")
-                            Text(currentVariant?.label ?? "清晰度")
-                        }
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(.black.opacity(0.45))
-                        .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                Button { showEpisodes = true } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "list.bullet")
-                        Text("选集")
-                    }
-                    .font(.system(size: 12, weight: .semibold))
+    private var topBar: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Button { teardown(); dismiss() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(.black.opacity(0.45))
-                    .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .opacity((detail?.episodes?.isEmpty == false) ? 1 : 0)
+                    .padding(9)
+                    .background(.black.opacity(0.5))
+                    .clipShape(Circle())
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 8)
+            .buttonStyle(.plain)
 
+            VStack(alignment: .leading, spacing: 2) {
+                Text(seriesTitle)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                if let c = current {
+                    Text("第 \(c.index) 集 / 共 \(detail?.totalEpisodes ?? 0) 集")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+            }
             Spacer()
 
-            // 中央：倒退 / 播放暂停 / 快进
-            HStack(spacing: 44) {
-                Button { skip(-15) } label: {
-                    Image(systemName: "gobackward.15")
-                        .font(.system(size: 30))
-                        .foregroundStyle(.white)
-                }
-                .buttonStyle(.plain)
-
-                Button { togglePlay() } label: {
-                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 44))
-                        .foregroundStyle(.white)
-                        .frame(width: 64, height: 64)
-                }
-                .buttonStyle(.plain)
-
-                Button { skip(15) } label: {
-                    Image(systemName: "goforward.15")
-                        .font(.system(size: 30))
-                        .foregroundStyle(.white)
-                }
-                .buttonStyle(.plain)
+            chip(danmaku.settings.enabled ? "弹幕开" : "弹幕关",
+                 icon: danmaku.settings.enabled ? "text.bubble.fill" : "text.bubble",
+                 active: danmaku.settings.enabled) {
+                danmaku.settings.enabled.toggle()
             }
+            chip("弹幕设置", icon: "slider.horizontal.3", active: false) {
+                showDanmakuSettings = true
+            }
+            if !variants.isEmpty {
+                chip(currentVariant?.label ?? "清晰度",
+                     icon: "rectangle.on.rectangle", active: false) {
+                    showQuality = true
+                }
+            }
+            chip("选集", icon: "list.bullet", active: false) {
+                showEpisodes = true
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .background(
+            LinearGradient(colors: [.black.opacity(0.6), .clear],
+                           startPoint: .top, endPoint: .bottom)
+                .frame(height: 120).offset(y: -20)
+        )
+    }
 
-            Spacer()
+    private func chip(_ title: String, icon: String, active: Bool,
+                      action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Image(systemName: icon).font(.system(size: 10))
+                Text(title).font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(active ? .white : .white.opacity(0.7))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(.black.opacity(0.5))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
 
-            // 底部：进度条
-            VStack(spacing: 8) {
+    private var centerButtons: some View {
+        HStack(spacing: 40) {
+            Button { skip(-15) } label: {
+                Image(systemName: "gobackward.15")
+                    .font(.system(size: 28)).foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+
+            Button { togglePlay() } label: {
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 40)).foregroundStyle(.white)
+                    .frame(width: 60, height: 60)
+                    .background(.black.opacity(0.35))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+
+            Button { skip(15) } label: {
+                Image(systemName: "goforward.15")
+                    .font(.system(size: 28)).foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var bottomBar: some View {
+        VStack(spacing: 6) {
+            // 进度条
+            HStack(spacing: 8) {
+                Text(fmt(isDraggingSeek ? scrubValue : progress))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .frame(width: 46, alignment: .leading)
+
                 Slider(
                     value: Binding(
-                        get: { isScrubbing ? scrubValue : progress },
+                        get: { isDraggingSeek ? scrubValue : progress },
                         set: { scrubValue = $0 }
                     ),
                     in: 0...max(duration, 1),
                     onEditingChanged: { editing in
-                        isScrubbing = editing
-                        if editing {
-                            scrubValue = progress
-                        } else {
+                        isDraggingSeek = editing
+                        if editing { scrubValue = progress }
+                        else {
                             player?.seek(to: CMTime(seconds: scrubValue,
                                                     preferredTimescale: 600),
-                                         toleranceBefore: .zero,
-                                         toleranceAfter: .zero)
+                                         toleranceBefore: .zero, toleranceAfter: .zero)
                             progress = scrubValue
                         }
                     }
                 )
                 .tint(Palette.accent)
 
-                HStack {
-                    Text(fmt(isScrubbing ? scrubValue : progress))
-                    Spacer()
-                    Text(fmt(duration))
-                }
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.8))
+                Text(fmt(duration))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .frame(width: 46, alignment: .trailing)
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 34)
-            .background(
-                LinearGradient(colors: [.clear, .black.opacity(0.65)],
-                               startPoint: .top, endPoint: .bottom)
-            )
+
+            // 倍速
+            HStack(spacing: 8) {
+                Text("倍速")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.6))
+                ForEach([0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { r in
+                    Button {
+                        setRate(Float(r))
+                    } label: {
+                        Text(r == 1.0 ? "1x" : "\(r)x")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(abs(rate - Float(r)) < 0.01
+                                             ? .white : .white.opacity(0.55))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .background(abs(rate - Float(r)) < 0.01
+                                        ? Palette.accent : .white.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+                if danmaku.total > 0 {
+                    Text("弹幕 \(danmaku.total)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+            }
         }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 28)
+        .background(
+            LinearGradient(colors: [.clear, .black.opacity(0.75)],
+                           startPoint: .top, endPoint: .bottom)
+                .frame(height: 130).offset(y: 30)
+        )
     }
 
-    // MARK: 诊断条
+    // MARK: 错误
 
-    private var debugBar: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button { showDebug.toggle() } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "ladybug.fill")
-                        Text(showDebug ? "收起" : "诊断")
-                    }
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.black.opacity(0.4))
-                    .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                Spacer()
+    private func errorOverlay(_ msg: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 26)).foregroundStyle(.orange)
+            Text(msg)
+                .font(.system(size: 13)).foregroundStyle(.white.opacity(0.9))
+                .multilineTextAlignment(.center).padding(.horizontal, 32)
+            HStack(spacing: 10) {
+                Button("重试") { Task { await loadDetail() } }
+                    .font(.system(size: 13, weight: .semibold))
+                    .padding(.horizontal, 18).padding(.vertical, 8)
+                    .background(Palette.accent).foregroundStyle(.white)
+                    .clipShape(Capsule()).buttonStyle(.plain)
+                Button(showDebug ? "隐藏日志" : "查看日志") { showDebug.toggle() }
+                    .font(.system(size: 13, weight: .semibold))
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(.white.opacity(0.15)).foregroundStyle(.white)
+                    .clipShape(Capsule()).buttonStyle(.plain)
             }
-            .padding(.horizontal, 16)
-
             if showDebug {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
                         ForEach(Array(debugLines.enumerated()), id: \.offset) { _, l in
-                            Text(l)
-                                .font(.system(size: 9, design: .monospaced))
+                            Text(l).font(.system(size: 9, design: .monospaced))
                                 .foregroundStyle(.white.opacity(0.7))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                    }
-                    .padding(8)
+                    }.padding(8)
                 }
-                .frame(maxHeight: 100)
-                .background(.black.opacity(0.7))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .padding(.horizontal, 16)
-                .padding(.bottom, 4)
+                .frame(maxHeight: 140)
+                .background(.black.opacity(0.8))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, 20)
             }
         }
     }
 
-    // MARK: 选集
+    // MARK: 选集 / 清晰度 / 弹幕设置
 
     private var episodeSheet: some View {
         NavigationStack {
@@ -324,22 +430,21 @@ struct ResolverPlayerView: View {
                                     .font(.system(size: 13, weight: .medium))
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 10)
-                                    .background(current?.vid == ep.vid ? Palette.accent : Palette.surface)
-                                    .foregroundStyle(current?.vid == ep.vid ? .white : Palette.textPrimary)
+                                    .background(current?.vid == ep.vid
+                                                ? Palette.accent : Palette.surface)
+                                    .foregroundStyle(current?.vid == ep.vid
+                                                     ? .white : Palette.textPrimary)
                                     .clipShape(RoundedRectangle(cornerRadius: 8))
                             }
                             .buttonStyle(.plain)
                         }
-                    }
-                    .padding(16)
+                    }.padding(16)
                 }
             }
             .navigationTitle("选集")
             .navigationBarTitleDisplayMode(.inline)
         }
     }
-
-    // MARK: 清晰度
 
     private var qualitySheet: some View {
         NavigationStack {
@@ -353,25 +458,21 @@ struct ResolverPlayerView: View {
                                 Task { await switchQuality(v) }
                             } label: {
                                 HStack {
-                                    Text(v.label)
-                                        .font(.system(size: 14, weight: .medium))
+                                    Text(v.label).font(.system(size: 14, weight: .medium))
                                     Spacer()
-                                    if currentVariant?.vid == v.vid,
-                                       currentVariant?.label == v.label {
+                                    if currentVariant?.vid == v.vid {
                                         Image(systemName: "checkmark")
                                             .foregroundStyle(Palette.accent)
                                     }
                                 }
                                 .foregroundStyle(Palette.textPrimary)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 12)
+                                .padding(.horizontal, 14).padding(.vertical, 12)
                                 .background(Palette.surface)
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                             }
                             .buttonStyle(.plain)
                         }
-                    }
-                    .padding(16)
+                    }.padding(16)
                 }
             }
             .navigationTitle("清晰度")
@@ -379,22 +480,125 @@ struct ResolverPlayerView: View {
         }
     }
 
-    // MARK: 错误
+    private var danmakuSettingsSheet: some View {
+        NavigationStack {
+            ZStack {
+                Palette.background.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        // 显示区域
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("显示区域").font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(Palette.textPrimary)
+                                Spacer()
+                                Text("\(Int(danmaku.settings.areaRatio * 100))%")
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(Palette.textSecondary)
+                            }
+                            Slider(value: $danmaku.settings.areaRatio, in: 0.15...1.0)
+                                .tint(Palette.accent)
+                            Text("控制弹幕占屏幕的高度比例")
+                                .font(.system(size: 10)).foregroundStyle(Palette.textTertiary)
+                        }
 
-    private func errorOverlay(_ msg: String) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 28)).foregroundStyle(.orange)
-            Text(msg)
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.9))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-            Button("重试") { Task { await loadDetail() } }
-                .font(.system(size: 13, weight: .semibold))
-                .padding(.horizontal, 20).padding(.vertical, 9)
-                .background(Palette.accent).foregroundStyle(.white)
-                .clipShape(Capsule()).buttonStyle(.plain)
+                        // 顶部留白
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("顶部留白").font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(Palette.textPrimary)
+                                Spacer()
+                                Text("\(Int(danmaku.settings.topInset))pt")
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(Palette.textSecondary)
+                            }
+                            Slider(value: $danmaku.settings.topInset, in: 0...200)
+                                .tint(Palette.accent)
+                        }
+
+                        // 字号
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("字号").font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(Palette.textPrimary)
+                                Spacer()
+                                Text("\(Int(danmaku.settings.fontSize))")
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(Palette.textSecondary)
+                            }
+                            Slider(value: $danmaku.settings.fontSize, in: 11...30, step: 1)
+                                .tint(Palette.accent)
+                        }
+
+                        // 速度
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("滚动时长").font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(Palette.textPrimary)
+                                Spacer()
+                                Text(String(format: "%.1fs", danmaku.settings.duration))
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(Palette.textSecondary)
+                            }
+                            Slider(value: $danmaku.settings.duration, in: 3...14)
+                                .tint(Palette.accent)
+                            Text("越小滚得越快")
+                                .font(.system(size: 10)).foregroundStyle(Palette.textTertiary)
+                        }
+
+                        // 不透明度
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("不透明度").font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(Palette.textPrimary)
+                                Spacer()
+                                Text("\(Int(danmaku.settings.opacity * 100))%")
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(Palette.textSecondary)
+                            }
+                            Slider(value: $danmaku.settings.opacity, in: 0.2...1.0)
+                                .tint(Palette.accent)
+                        }
+
+                        Toggle("文字描边", isOn: $danmaku.settings.stroke)
+                            .font(.system(size: 13))
+                            .tint(Palette.accent)
+
+                        Button {
+                            Task { await reloadDanmaku() }
+                        } label: {
+                            HStack {
+                                Image(systemName: "arrow.clockwise")
+                                Text(danmaku.loading ? "重新拉取中…" : "重新拉取弹幕")
+                            }
+                            .font(.system(size: 13, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                            .background(Palette.surface)
+                            .foregroundStyle(Palette.textPrimary)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                        .buttonStyle(.plain)
+
+                        Text("共 \(danmaku.total) 条弹幕")
+                            .font(.system(size: 10)).foregroundStyle(Palette.textTertiary)
+                    }
+                    .padding(16)
+                }
+            }
+            .navigationTitle("弹幕设置")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") {
+                        danmaku.rebuild(laneCount: danmaku.laneCount(for: 800))
+                        showDanmakuSettings = false
+                    }
+                }
+            }
+            .onChange(of: danmaku.settings) { _ in
+                danmaku.rebuild(laneCount: danmaku.laneCount(for: 800))
+            }
         }
     }
 
@@ -413,7 +617,12 @@ struct ResolverPlayerView: View {
             detail = d
             let eps = d.episodes ?? []
             guard !eps.isEmpty else { errorText = "这部剧没有分集列表。"; return }
-            let target = eps.first(where: { $0.index == startIndex }) ?? eps[0]
+
+            // 续播：优先用历史记录的集数
+            let resumeEp = library.record(for: seriesID)?.lastEpisode ?? startIndex
+            let target = eps.first(where: { $0.index == resumeEp })
+                ?? eps.first(where: { $0.index == startIndex })
+                ?? eps[0]
             await playEpisode(target)
         } catch {
             errorText = error.localizedDescription
@@ -423,19 +632,16 @@ struct ResolverPlayerView: View {
     private func playEpisode(_ ep: HGServerEpisode) async {
         loading = true
         errorText = nil
-        defer { loading = false }
         debugLines.removeAll()
+        defer { loading = false }
 
         do {
             let url = try client.streamURL(vid: ep.vid)
-            log("播放 第\(ep.index)集 vid=\(ep.vid)")
-            log("url=\(url.absoluteString)")
+            log("播放 第\(ep.index)集")
 
-            // 拉清晰度列表（每个清晰度是一个独立 vid，服务端 /api/play 会告诉我们）
             await loadVariants(for: ep)
 
-            removeAllObservers()
-
+            removeObservers()
             let p = player ?? AVPlayer()
             let item = AVPlayerItem(url: url)
             item.preferredForwardBufferDuration = 8
@@ -446,69 +652,75 @@ struct ResolverPlayerView: View {
             current = ep
             duration = 0
             progress = 0
+            p.rate = rate
 
-            // 时间轴 + 自动连播观察器必须在 replaceCurrentItem 之后装，
-            // 否则 currentItem 还是旧的，回调绑不上。
-            installTimeObserver()
-            installEndObserver()
+            // 续播：同一集且有进度就跳过去
+            if let rec = library.record(for: seriesID),
+               rec.lastEpisode == ep.index,
+               let pos = rec.position, pos > 3 {
+                await p.seek(to: CMTime(seconds: pos, preferredTimescale: 600),
+                             toleranceBefore: .zero, toleranceAfter: .zero)
+                progress = pos
+                log("续播 \(Int(pos))s")
+            }
 
             p.play()
             isPlaying = true
+            installTimeObserver()
+            installEndObserver()
             scheduleHideControls()
 
-            // 弹幕：换集时清空并重新拉
+            // 记录历史
+            if let d = detail {
+                library.touchHistory(
+                    HGFeedItem(seriesID: seriesID, itemID: nil,
+                               title: d.title ?? seriesTitle, cover: d.cover,
+                               intro: nil, tags: nil, episodeText: nil,
+                               episodeCount: d.totalEpisodes, freeEpisodes: nil,
+                               playCount: nil, followedCount: nil),
+                    episode: ep.index
+                )
+            }
+
+            // 弹幕
             danmaku.clear()
-            dmCursor = ""
-            dmTotal = 0
-            Task { await loadDanmaku(for: ep, reset: true) }
+            Task { await loadDanmaku(for: ep) }
         } catch {
             errorText = error.localizedDescription
             log("ERR \(error.localizedDescription)")
         }
     }
 
-    /// 清晰度：服务端 /api/play 返回当前质量，这里用「重新请求不同 preferredHeight」
-    /// 简化实现——先拿到主 vid 的可用质量（服务端给最高），
-    /// 其余档位由服务端按 vid 变化，交给 /api/play 的 quality 字段。
+    private func reloadDanmaku() async {
+        guard let ep = current else { return }
+        danmaku.clear()
+        await loadDanmaku(for: ep)
+    }
+
+    private func loadDanmaku(for ep: HGServerEpisode) async {
+        danmaku.setLoading(true)
+        defer { danmaku.setLoading(false) }
+        do {
+            let page = try await client.danmaku(vid: ep.vid, seriesID: seriesID)
+            let items = page.items ?? []
+            danmaku.load(items)
+            danmaku.rebuild(laneCount: danmaku.laneCount(for: 800))
+            log("弹幕 \(items.count) 条")
+        } catch {
+            log("弹幕失败 \(error.localizedDescription)")
+        }
+    }
+
     private func loadVariants(for ep: HGServerEpisode) async {
         do {
             let p = try await client.play(vid: ep.vid)
             guard let url = try? client.streamURL(vid: ep.vid) else { return }
             let label = p.quality ?? "自动"
-            let v = HGVariant(vid: ep.vid, label: label, height: Self.heightOf(label), url: url)
+            let v = HGVariant(vid: ep.vid, label: label, url: url)
             variants = [v]
             currentVariant = v
-            log("质量=\(label) (\(p.totalBytes ?? 0) 字节)")
         } catch {
             variants = []
-        }
-    }
-
-    /// 拉整集弹幕。
-    ///
-    /// 上游按时间窗返回，很多剧的弹幕集中在片尾（实测某剧 50 条全在 100s 后），
-    /// 只拉第一页会拿到空结果。服务端已支持「整集模式」：
-    /// 不带 cursor / offset_ms 时，服务端自己遍历所有窗口再合并返回。
-    private func loadDanmaku(for ep: HGServerEpisode, reset: Bool = false) async {
-        guard !dmLoading else { return }
-        dmLoading = true
-        defer { dmLoading = false }
-
-        do {
-            let page = try await client.danmaku(vid: ep.vid, seriesID: seriesID)
-            let items = page.items ?? []
-            dmTotal = max(page.total ?? 0, items.count)
-            danmaku.load(items)
-            log("弹幕 \(items.count) 条 / 上游 \(dmTotal)")
-            if items.isEmpty {
-                log("这一集没有弹幕")
-            } else {
-                // 弹幕拉取要几秒，这期间视频已经播了一段。
-                // 装载后立刻按当前进度补一次，避免开头的弹幕被吞掉。
-                danmaku.tick(currentTime: progress)
-            }
-        } catch {
-            log("弹幕失败 \(error.localizedDescription)")
         }
     }
 
@@ -521,7 +733,6 @@ struct ResolverPlayerView: View {
         observe(item: item)
         p.replaceCurrentItem(with: item)
         currentVariant = v
-        // 换了 item，结束通知要重新绑定到新的 currentItem
         if let e = endObserver { NotificationCenter.default.removeObserver(e) }
         endObserver = nil
         installEndObserver()
@@ -530,12 +741,7 @@ struct ResolverPlayerView: View {
                          toleranceBefore: .zero, toleranceAfter: .zero)
         }
         if wasPlaying { p.play() }
-        log("切清晰度 -> \(v.label)")
-    }
-
-    private static func heightOf(_ label: String) -> Int {
-        let digits = label.filter(\.isNumber)
-        return Int(digits) ?? 0
+        log("切清晰度 \(v.label)")
     }
 
     // MARK: 观察
@@ -548,13 +754,13 @@ struct ResolverPlayerView: View {
                 case .readyToPlay:
                     let d = obj.duration.seconds
                     if d.isFinite, d > 0 { duration = d }
-                    log("ready dur=\(String(format: "%.1f", d))")
+                    log("ready \(String(format: "%.1f", d))s")
                 case .failed:
                     let ns = obj.error as NSError?
                     log("failed \(obj.error?.localizedDescription ?? "?") [\(ns?.code ?? 0)]")
                     errorText = "播放失败：\(obj.error?.localizedDescription ?? "未知")"
                 case .unknown:
-                    log("status=unknown")
+                    break
                 @unknown default: break
                 }
             }
@@ -564,17 +770,24 @@ struct ResolverPlayerView: View {
     private func installTimeObserver() {
         guard let p = player, timeObserver == nil else { return }
         timeObserver = p.addPeriodicTimeObserver(
-            forInterval: CMTime(seconds: 0.1, preferredTimescale: 600),
+            forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
             queue: .main
         ) { t in
-            guard !isScrubbing else { return }
+            guard !isDraggingSeek else { return }
             let s = t.seconds
-            if s.isFinite {
-                progress = s
-                danmaku.tick(currentTime: s)
-            }
+            if s.isFinite { progress = s }
             let d = p.currentItem?.duration.seconds ?? 0
             if d.isFinite, d > 0 { duration = d }
+
+            // 每约 5 秒存一次进度
+            if let ep = current,
+               Int(s) % 5 == 0, Int(s) != lastSavedSecond {
+                lastSavedSecond = Int(s)
+                library.saveProgress(seriesID: seriesID,
+                                     episode: ep.index,
+                                     position: s,
+                                     duration: d)
+            }
         }
     }
 
@@ -587,11 +800,10 @@ struct ResolverPlayerView: View {
         }
     }
 
-    private func removeAllObservers() {
+    private func removeObservers() {
         if let t = timeObserver, let p = player { p.removeTimeObserver(t) }
         timeObserver = nil
         statusObs?.invalidate(); statusObs = nil
-        rateObs?.invalidate(); rateObs = nil
         if let e = endObserver { NotificationCenter.default.removeObserver(e) }
         endObserver = nil
     }
@@ -608,28 +820,32 @@ struct ResolverPlayerView: View {
     private func skip(_ seconds: Double) {
         guard let p = player else { return }
         let t = p.currentTime().seconds + seconds
-        let maxT = max(duration, 1)
-        let target = min(max(t, 0), maxT)
+        let target = min(max(t, 0), max(duration, 1))
         p.seek(to: CMTime(seconds: target, preferredTimescale: 600),
                toleranceBefore: .zero, toleranceAfter: .zero)
         progress = target
-        scheduleHideControls()
+    }
+
+    private func setRate(_ r: Float) {
+        rate = r
+        player?.rate = r
+        if !isPlaying { player?.pause() }
     }
 
     private func toggleControls() {
-        withAnimation(.easeInOut(duration: 0.2)) {
-            controlsVisible.toggle()
-        }
+        withAnimation(.easeInOut(duration: 0.18)) { controlsVisible.toggle() }
         if controlsVisible { scheduleHideControls() }
     }
 
     private func scheduleHideControls() {
         hideTask?.cancel()
         hideTask = Task {
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
-            guard !Task.isCancelled, !showEpisodes, !showQuality, !isScrubbing else { return }
+            try? await Task.sleep(nanoseconds: 4_500_000_000)
+            guard !Task.isCancelled else { return }
             await MainActor.run {
-                withAnimation(.easeInOut(duration: 0.3)) { controlsVisible = false }
+                if !showEpisodes && !showQuality && !showDanmakuSettings {
+                    withAnimation(.easeInOut(duration: 0.25)) { controlsVisible = false }
+                }
             }
         }
     }
@@ -644,26 +860,23 @@ struct ResolverPlayerView: View {
 
     private func teardown() {
         hideTask?.cancel()
-        removeAllObservers()
+        hintTask?.cancel()
+        removeObservers()
         player?.pause()
         player = nil
     }
 
     private func log(_ s: String) {
         debugLines.append(s)
-        if debugLines.count > 40 { debugLines.removeFirst() }
-        #if DEBUG
-        print("[Resolver] \(s)")
-        #endif
+        if debugLines.count > 30 { debugLines.removeFirst() }
     }
 
     private func fmt(_ sec: Double) -> String {
         guard sec.isFinite, sec >= 0 else { return "00:00" }
         let s = Int(sec)
         let h = s / 3600, m = (s % 3600) / 60, ss = s % 60
-        return h > 0
-            ? String(format: "%d:%02d:%02d", h, m, ss)
-            : String(format: "%02d:%02d", m, ss)
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, ss)
+                     : String(format: "%02d:%02d", m, ss)
     }
 }
 

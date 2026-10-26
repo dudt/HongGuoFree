@@ -1,7 +1,10 @@
-// 弹幕层
+// 弹幕引擎与渲染
 //
-// 数据来自 /api/danmaku（服务端已带签名拉好红果真实弹幕）。
-// 渲染方式：按 offset_ms 从右向左滚动，分轨道避免重叠。
+// 性能要点（旧版卡顿的原因）：
+//   旧版每 0.1 秒重建一次 active 数组，触发 SwiftUI 全量 diff + 重新布局，
+//   弹幕一多就掉帧。
+//   新版：数据只在「装载」时算一次静态轨道表，渲染交给 TimelineView
+//   自己按时间插值，SwiftUI 不参与每帧状态更新。
 import SwiftUI
 import Combine
 
@@ -39,16 +42,10 @@ struct HGDmakuPage: Decodable {
 // MARK: - 客户端
 
 extension HGServerClient {
-    /// 拉一页弹幕
-    ///
-    /// cursor 是服务端返回的 JSON 串，里面含 `{` `"` `:` 等字符。
-    /// 不能用 addingPercentEncoding 后再拼进路径 —— absolute() 会再走
-    /// URL(string:)，百分号会被二次编码成 %25，服务端收到坏 cursor。
-    /// 这里改用 URLComponents 组装，只编码一次。
+    /// 拉整集弹幕（服务端负责遍历所有时间窗）
     func danmaku(vid: String, seriesID: String, cursor: String = "",
                  offsetMs: Int = 0) async throws -> HGDmakuPage {
         guard let base = config.normalized else { throw HGServeError.notConfigured }
-
         var baseStr = base.absoluteString
         while baseStr.hasSuffix("/") { baseStr.removeLast() }
 
@@ -59,21 +56,16 @@ extension HGServerClient {
             URLQueryItem(name: "vid", value: vid),
             URLQueryItem(name: "series_id", value: seriesID),
         ]
-        if !cursor.isEmpty {
-            items.append(URLQueryItem(name: "cursor", value: cursor))
-        }
-        if offsetMs > 0 {
-            items.append(URLQueryItem(name: "offset_ms", value: String(offsetMs)))
-        }
+        if !cursor.isEmpty { items.append(URLQueryItem(name: "cursor", value: cursor)) }
+        if offsetMs > 0 { items.append(URLQueryItem(name: "offset_ms", value: String(offsetMs))) }
         if !config.token.isEmpty {
             items.append(URLQueryItem(name: "token", value: config.token))
         }
         comps.queryItems = items
-
         guard let url = comps.url else { throw HGServeError.badPath("/api/danmaku") }
 
         var req = URLRequest(url: url)
-        req.timeoutInterval = 30
+        req.timeoutInterval = 45
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         if !config.token.isEmpty {
             req.setValue(config.token, forHTTPHeaderField: "X-Auth-Token")
@@ -88,90 +80,86 @@ extension HGServerClient {
     }
 }
 
-// MARK: - 弹幕轨道引擎
+// MARK: - 设置
+
+struct DanmakuSettings: Equatable {
+    var enabled = true
+    /// 屏幕占用比例（0.3 = 只在上面 30% 区域滚动）
+    var areaRatio: Double = 0.45
+    /// 顶部留白（避开播放器顶部按钮）
+    var topInset: Double = 44
+    /// 字号
+    var fontSize: Double = 16
+    /// 飞行时长（秒），越小越快
+    var duration: Double = 7.5
+    /// 不透明度
+    var opacity: Double = 0.92
+    /// 是否显示描边
+    var stroke = true
+}
+
+// MARK: - 静态轨道表
+
+/// 一条已经排好轨道的弹幕（装载时一次性算完）
+struct ScheduledDanmaku: Identifiable {
+    let id: String
+    let text: String
+    let lane: Int
+    let startSec: Double
+}
 
 @MainActor
 final class DanmakuEngine: ObservableObject {
-    /// 当前应显示的弹幕
-    @Published private(set) var active: [ActiveDanmaku] = []
-    @Published var isEnabled = true
-    @Published var opacity: Double = 0.9
-    @Published var fontSize: CGFloat = 15
+    @Published var settings = DanmakuSettings()
+    @Published private(set) var scheduled: [ScheduledDanmaku] = []
+    @Published private(set) var total = 0
+    @Published private(set) var loading = false
 
-    struct ActiveDanmaku: Identifiable, Equatable {
-        let id: String
-        let text: String
-        let lane: Int
-        let startSec: Double
-        let duration: Double   // 飞过屏幕所需秒数
+    private var raw: [HGDmakuItem] = []
+
+    /// 当前可用的轨道数（随屏幕高度和字号变化）
+    func laneCount(for height: CGFloat) -> Int {
+        let usable = Double(height) * settings.areaRatio - settings.topInset
+        let laneHeight = settings.fontSize * 1.9
+        return max(1, min(12, Int(usable / laneHeight)))
     }
 
-    private var all: [HGDmakuItem] = []
-    private var laneFreeAt: [Double] = Array(repeating: 0, count: 6)
-    let laneCount = 6
-
-    /// 装载整集弹幕
     func load(_ items: [HGDmakuItem]) {
-        all = items.sorted { $0.offsetMs < $1.offsetMs }
-        active = []
-        laneFreeAt = Array(repeating: 0, count: laneCount)
+        raw = items.sorted { $0.offsetMs < $1.offsetMs }
+        total = raw.count
+        rebuild()
     }
 
     func clear() {
-        all = []
-        active = []
-        laneFreeAt = Array(repeating: 0, count: laneCount)
+        raw = []
+        scheduled = []
+        total = 0
     }
 
-    var total: Int { all.count }
+    func setLoading(_ v: Bool) { loading = v }
 
-    /// 播放进度变化时调用（currentTime 单位：秒）
-    func tick(currentTime: Double) {
-        guard isEnabled, !all.isEmpty else {
-            if !active.isEmpty { active = [] }
-            return
-        }
+    /// 按当前设置重排轨道（设置变化时调用）
+    func rebuild(laneCount lanes: Int = 8) {
+        guard !raw.isEmpty else { scheduled = []; return }
+        var freeAt = [Double](repeating: 0, count: max(lanes, 1))
+        var out: [ScheduledDanmaku] = []
+        out.reserveCapacity(raw.count)
 
-        let window = 8.0   // 一条弹幕飞过屏幕所需秒数
-
-        var next: [ActiveDanmaku] = []
-
-        // 1) 已经在屏上的：只要还没飞完就保留
-        for d in active where currentTime < d.startSec + d.duration {
-            next.append(d)
-        }
-
-        // 2) 补上「已经开始但还没上屏」的弹幕。
-        //    不能只用 ±0.3s 的窄窗口 —— 时间观察器是 0.4s 间隔，
-        //    窗口太窄会漏掉大部分弹幕。
-        //    正确条件：起始时间在 (currentTime - window, currentTime] 之间。
-        let lower = currentTime - window
-        for item in all {
+        for item in raw {
             let t = item.offsetSec
-            if t > currentTime { break }        // 还没到
-            if t <= lower { continue }          // 已经飞过去了
-            if next.contains(where: { $0.id == item.id }) { continue }
-
-            // 找空闲轨道
             var lane = -1
-            for i in 0..<laneCount {
-                if laneFreeAt[i] <= t {
+            for i in 0..<freeAt.count {
+                if freeAt[i] <= t {
                     lane = i
-                    laneFreeAt[i] = t + 2.2   // 该轨道占用 2.2 秒
+                    // 该轨道下一次可用时间：飞完一半后再放下一条，避免贴太紧
+                    freeAt[i] = t + settings.duration * 0.45
                     break
                 }
             }
-            if lane < 0 { lane = Int.random(in: 0..<laneCount) }
-
-            next.append(ActiveDanmaku(
-                id: item.id,
-                text: item.text,
-                lane: lane,
-                startSec: t,
-                duration: window
-            ))
+            if lane < 0 { continue }   // 轨道满了就丢掉，不随机塞
+            out.append(ScheduledDanmaku(id: item.id, text: item.text,
+                                        lane: lane, startSec: t))
         }
-
-        if next != active { active = next }
+        scheduled = out
     }
 }

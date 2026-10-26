@@ -21,6 +21,24 @@ struct HGFeedItem: Identifiable, Decodable {
 
     var id: String { seriesID }
 
+    init(seriesID: String, itemID: String? = nil, title: String? = nil,
+         cover: String? = nil, intro: String? = nil, tags: [String]? = nil,
+         episodeText: String? = nil, episodeCount: Int? = nil,
+         freeEpisodes: Int? = nil, playCount: Int? = nil,
+         followedCount: Int? = nil) {
+        self.seriesID = seriesID
+        self.itemID = itemID
+        self.title = title
+        self.cover = cover
+        self.intro = intro
+        self.tags = tags
+        self.episodeText = episodeText
+        self.episodeCount = episodeCount
+        self.freeEpisodes = freeEpisodes
+        self.playCount = playCount
+        self.followedCount = followedCount
+    }
+
     enum CodingKeys: String, CodingKey {
         case seriesID = "series_id"
         case itemID = "item_id"
@@ -54,11 +72,13 @@ struct HGDiscoverResponse: Decodable {
     var offset: Int?
     var count: Int?
     var hasMore: Bool?
+    var nextOffset: Int?
     var items: [HGFeedItem]?
 
     enum CodingKeys: String, CodingKey {
         case ok, tab, offset, count, items
         case hasMore = "has_more"
+        case nextOffset = "next_offset"
     }
 }
 
@@ -140,7 +160,7 @@ final class HGFeedStore: ObservableObject {
             let client = HGServerClient(config: config)
             let resp = try await client.discover(tab: tab, offset: 0, count: pageSize)
             items = resp.items ?? []
-            offset = items.count
+            offset = resp.nextOffset ?? items.count
             hasMore = resp.hasMore ?? false
         } catch {
             errorText = error.localizedDescription
@@ -158,7 +178,8 @@ final class HGFeedStore: ObservableObject {
                 !items.contains(where: { $0.seriesID == new.seriesID })
             }
             items.append(contentsOf: fresh)
-            offset += (resp.items ?? []).count
+            // 服务端给的是上游真实 offset，不能自己累加（会有重复被过滤）
+            offset = resp.nextOffset ?? (offset + (resp.items ?? []).count)
             hasMore = (resp.hasMore ?? false) && !fresh.isEmpty
         } catch {
             errorText = error.localizedDescription
